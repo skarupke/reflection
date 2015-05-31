@@ -1,0 +1,2 @@
+CPP_FLAGS += '-O2'
+DEFINES += '-DNDEBUG'

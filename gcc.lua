@@ -1,0 +1,1 @@
+CPP_COMPILER = 'g++-5'
