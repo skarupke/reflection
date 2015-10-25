@@ -7,7 +7,71 @@
 namespace metaf
 {
 
-typedef Range<const unsigned char> BinaryInput;
+
+namespace detail
+{
+template<typename T, typename = void>
+struct equality_comparable_helper
+{
+    static constexpr bool value = false;
+};
+
+template<typename T>
+struct equality_comparable_helper<T, typename std::enable_if<true, decltype(static_cast<void>(std::declval<T&>() == std::declval<T&>()))>::type>
+{
+    static constexpr bool value = true;
+};
+}
+
+template<typename T>
+struct is_equality_comparable
+    : detail::equality_comparable_helper<T>
+{
+};
+template<typename T, typename A>
+struct is_equality_comparable<std::vector<T, A>>
+    : metaf::is_equality_comparable<T>
+{
+};
+template<typename T, size_t Size>
+struct is_equality_comparable<T[Size]>
+    : metaf::is_equality_comparable<T>
+{
+};
+/*template<typename K, typename V, typename C, typename A>
+struct is_equality_comparable<std::multimap<K, V, C, A> >
+    : std::integral_constant<bool, metaf::is_equality_comparable<K>::value && metaf::is_equality_comparable<V>::value>
+{
+};*/
+
+struct BinaryInput
+{
+    BinaryInput(Range<const unsigned char> input)
+        : input(input)
+    {
+    }
+
+    template<typename T>
+    void memcpy(T & output)
+    {
+        auto end = input.begin() + sizeof(T);
+        std::copy(input.begin(), end, reinterpret_cast<unsigned char *>(std::addressof(output)));
+        input = { end, input.end() };
+    }
+    template<typename T>
+    void step_back()
+    {
+        input = { input.begin() - sizeof(T), input.end() };
+    }
+    template<typename T>
+    void step_back(const T &)
+    {
+        step_back<T>();
+    }
+
+    Range<const unsigned char> input;
+};
+
 
 template<typename T, typename Ar>
 void reflect_registered_class(Ar & archive, int16_t version);
@@ -43,10 +107,10 @@ template<template<typename> class Ar, typename T>\
 void reflect_ ## type<Ar, T>::operator()(Ar<T> & archive, int16_t version) const\
 {\
     static_cast<void>(version);\
-    static_cast<void>(archive);
-#define REFLECT_MEMBER(member_name) archive.member(#member_name, &T::member_name)
-#define REFLECT_BASE(class_name) archive.template base<class_name>()
-#define REFLECT_CLASS_END()\
+    archive
+#define REFLECT_MEMBER(member_name) .member(#member_name, &T::member_name)
+#define REFLECT_BASE(class_name) .template base<class_name>()
+#define REFLECT_CLASS_END() .finish();\
 }
 #define FRIEND_REFLECT_CLASSES(type) template<template<typename> class, typename> friend struct reflect_ ## type
 
@@ -87,17 +151,70 @@ void array(std::ostream & output, const S * begin, const S * end)
 }
 
 template<typename S>
+inline void deserialize_struct(BinaryInput & input, S & data)
+{
+    OptimisticBinaryDeserializer<S> deserializer(data, input);
+    reflect_registered_class<S>(deserializer, get_current_version<S>());
+}
+template<typename S>
+const S & get_default_values()
+{
+    static const S default_initialized = S();
+    return default_initialized;
+}
+template<typename T, typename = void>
+struct default_comparer
+{
+    bool operator()(const T & object, const T & defaults) const
+    {
+        return object == defaults;
+    }
+};
+template<typename T>
+struct default_comparer<T, typename std::enable_if<!metaf::is_equality_comparable<T>::value>::type>
+{
+    bool operator()(const T &, const T &) const
+    {
+        return false;
+    }
+};
+template<typename T, size_t Size>
+struct default_comparer<T[Size], void>
+{
+    bool operator()(const T (&object)[Size], const T (&defaults)[Size]) const
+    {
+        return std::equal(object, object + Size, defaults);
+    }
+};
+
+template<typename T>
+inline bool is_default(const T & object, const T & defaults)
+{
+    return default_comparer<T>()(object, defaults);
+}
+template<typename S, typename M>
+inline bool is_default(const S & object, M S::*member, const S & defaults)
+{
+    return is_default(object.*member, defaults.*member);
+}
+
+template<typename S>
+inline void serialize_struct(std::ostream & output, const S & data, const S & defaults)
+{
+    OptimisticBinarySerializer<S> serializer(data, output, defaults);
+    reflect_registered_class<S>(serializer, get_current_version<S>());
+}
+
+template<typename S>
 struct reference_specialization
 {
     void operator()(BinaryInput & input, S & data)
     {
-        OptimisticBinaryDeserializer<S> deserializer(data, input);
-        reflect_registered_class<S>(deserializer, get_current_version<S>());
+        deserialize_struct(input, data);
     }
     void operator()(std::ostream & output, const S & data)
     {
-        OptimisticBinarySerializer<S> serializer(data, output);
-        reflect_registered_class<S>(serializer, get_current_version<S>());
+        serialize_struct(output, data, get_default_values<S>());
     }
 };
 
@@ -127,9 +244,7 @@ struct reference_specialization<std::vector<S, A>>
 template<typename S>
 inline void memcpy_reference(BinaryInput & input, S & data)
 {
-    auto end = input.begin() + sizeof(S);
-    std::copy(input.begin(), end, reinterpret_cast<unsigned char *>(std::addressof(data)));
-    input = { end, input.end() };
+    input.memcpy(data);
 }
 template<typename S>
 inline void memcpy_reference(std::ostream & output, const S & data)
@@ -510,54 +625,139 @@ struct OptimisticBinaryDeserializer
         : object(object), input(input)
     {
     }
+    ~OptimisticBinaryDeserializer()
+    {
+        if (!read_any_members)
+        {
+            uint8_t zero = 0;
+            detail::reference(input, zero);
+            RAW_ASSERT(zero == 0);
+        }
+    }
 
     template<typename M>
-    void member(Range<const char>, M T::*m)
+    OptimisticBinaryDeserializer & member(Range<const char>, M T::*m)
     {
-        detail::reference(input, object.*m);
-    }
-    template<typename M, size_t Size>
-    void member(Range<const char>, M (T::*m)[Size])
-    {
-        detail::array(input, object.*m, object.*m + Size);
+        if (!should_skip_member())
+        {
+            read_member(m);
+        }
+        return *this;
     }
     template<typename B>
-    void base()
+    OptimisticBinaryDeserializer & base()
     {
-        detail::reference(input, static_cast<B &>(object));
+        if (!should_skip_member())
+        {
+            detail::reference(input, static_cast<B &>(object));
+        }
+        return *this;
+    }
+    void finish()
+    {
     }
 
 private:
     T & object;
     BinaryInput & input;
+    uint8_t current_member = 1;
+    bool read_any_members = false;
+
+    bool should_skip_member()
+    {
+        uint8_t member_index = 0;
+        detail::reference(input, member_index);
+        bool skip = member_index != current_member;
+        if (skip)
+        {
+            input.step_back(member_index);
+        }
+        else
+        {
+            read_any_members = true;
+        }
+        ++current_member;
+        return skip;
+    }
+
+    template<typename M>
+    void read_member(M T::*m)
+    {
+        detail::reference(input, object.*m);
+    }
+    template<typename M, size_t Size>
+    void read_member(M (T::*m)[Size])
+    {
+        detail::array(input, object.*m, object.*m + Size);
+    }
 };
 template<typename T>
 struct OptimisticBinarySerializer
 {
-    OptimisticBinarySerializer(const T & object, std::ostream & output)
-        : object(object), output(output)
+    OptimisticBinarySerializer(const T & object, std::ostream & output, const T & defaults)
+        : object(object), defaults(defaults), output(output)
     {
+    }
+    ~OptimisticBinarySerializer()
+    {
+        if (!wrote_any_members)
+            detail::reference(output, uint8_t(0));
     }
 
     template<typename M>
-    void member(Range<const char>, M T::*m)
+    OptimisticBinarySerializer & member(Range<const char>, M T::*m)
     {
-        detail::reference(output, object.*m);
-    }
-    template<typename M, size_t Size>
-    void member(Range<const char>, M (T::*m)[Size])
-    {
-        detail::array(output, object.*m, object.*m + Size);
+        if (!detail::is_default(object, m, defaults))
+        {
+            write_member_start();
+            write_member(m);
+        }
+        after_member();
+        return *this;
     }
     template<typename B>
-    void base()
+    OptimisticBinarySerializer & base()
     {
-        detail::reference(output, static_cast<const B &>(object));
+        if (!detail::is_default(static_cast<const B &>(object), static_cast<const B &>(defaults)))
+        {
+            write_member_start();
+            detail::serialize_struct(output, static_cast<const B &>(object), static_cast<const B &>(defaults));
+        }
+        after_member();
+        return *this;
+    }
+    void finish()
+    {
     }
 
 private:
     const T & object;
+    const T & defaults;
     std::ostream & output;
+    uint8_t current_member = 1;
+    bool wrote_any_members = false;
+
+    void write_member_start()
+    {
+        detail::reference(output, current_member);
+        wrote_any_members = true;
+    }
+    void after_member()
+    {
+        ++current_member;
+        RAW_ASSERT(current_member != std::numeric_limits<uint8_t>::max(), "Serialization only supports structs with up to 254 members. This is required to only use one byte of overhead per member. Can you move some members to a nested struct?");
+    }
+
+    template<typename M>
+    void write_member(M T::*m)
+    {
+        detail::reference(output, object.*m);
+    }
+    template<typename M, size_t Size>
+    void write_member(M (T::*m)[Size])
+    {
+        detail::array(output, object.*m, object.*m + Size);
+    }
 };
 
 }

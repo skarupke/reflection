@@ -12,6 +12,12 @@ struct HasMembers
     bool b = false;
 };
 
+REFLECT_CLASS_START(HasMembers, 0)
+    REFLECT_MEMBER(i)
+    REFLECT_MEMBER(f)
+    REFLECT_MEMBER(b)
+REFLECT_CLASS_END()
+
 template<typename T>
 Range<const unsigned char> as_bytes(const T & object)
 {
@@ -22,7 +28,7 @@ Range<const unsigned char> as_bytes(const T & object)
 metaf::BinaryInput StringToBinaryInput(const std::string & input)
 {
     auto begin = reinterpret_cast<const unsigned char *>(input.data());
-    return { begin, begin + input.size() };
+    return { { begin, begin + input.size() } };
 }
 
 struct InMemoryBinaryInput
@@ -143,36 +149,28 @@ TEST(metafast, float_compressed_special_values)
 TEST(metafast, simple)
 {
     HasMembers foo;
-    int five = 5;
-    auto five_input = serialize_to_buffer(five);
-    metaf::OptimisticBinaryDeserializer<HasMembers> serializer(foo, five_input);
-    serializer.member("i", &HasMembers::i);
-    ASSERT_EQ(5, foo.i);
-    float ten = 10.0f;
-    auto ten_input = serialize_to_buffer(ten);
-    metaf::OptimisticBinaryDeserializer<HasMembers> other_serializer(foo, ten_input);
-    other_serializer.member("f", &HasMembers::f);
-    ASSERT_EQ(10, foo.f);
-    bool is_true = true;
-    auto true_input = serialize_to_buffer(is_true);
-    metaf::OptimisticBinaryDeserializer<HasMembers> third_serializer(foo, true_input);
-    third_serializer.member("b", &HasMembers::b);
-    ASSERT_TRUE(foo.b);
+    foo.i = 5;
+    foo.f = 10.0f;
+    foo.b = true;
+    HasMembers copy = roundtrip(foo);
+    ASSERT_EQ(foo.i, copy.i);
+    ASSERT_EQ(foo.f, copy.f);
+    ASSERT_EQ(foo.b, copy.b);
 }
+
+struct StructWithVector
+{
+    std::vector<float> vec;
+};
+REFLECT_CLASS_START(StructWithVector, 0)
+    REFLECT_MEMBER(vec)
+REFLECT_CLASS_END()
 
 TEST(metafast, vector)
 {
-    std::vector<float> data = { 1.0f, 2.0f, 3.0f };
-
-    struct StructWithVector
-    {
-        std::vector<float> vec;
-    }
-    to_deserialize;
-    auto vec_input = serialize_to_buffer(data);
-    metaf::OptimisticBinaryDeserializer<StructWithVector> serializer(to_deserialize, vec_input);
-    serializer.member("vec", &StructWithVector::vec);
-    ASSERT_EQ(data, to_deserialize.vec);
+    StructWithVector to_deserialize = { { 1.0f, 2.0f, 3.0f } };
+    StructWithVector copy = roundtrip(to_deserialize);
+    ASSERT_EQ(to_deserialize.vec, copy.vec);
 }
 
 struct Base
@@ -216,26 +214,14 @@ private:
 };
 
 REFLECT_CLASS_START(Base, 0)
-    REFLECT_MEMBER(foo);
+    REFLECT_MEMBER(foo)
 REFLECT_CLASS_END()
 REFLECT_CLASS_START(Derived, 0)
-    REFLECT_BASE(Base);
-    REFLECT_MEMBER(bar);
+    REFLECT_BASE(Base)
+    REFLECT_MEMBER(bar)
 REFLECT_CLASS_END()
 
 TEST(metafast, base)
-{
-    Derived a = { 5, 6 };
-    metaf::BinaryInput input = as_bytes(a);
-
-    Derived b = { 0, 0 };
-    metaf::OptimisticBinaryDeserializer<Derived> archive(b, input);
-    metaf::reflect_registered_class<Derived>(archive, metaf::get_current_version<Derived>());
-    ASSERT_EQ(5, b.GetFoo());
-    ASSERT_EQ(6, b.GetBar());
-}
-
-TEST(metafast, roundtrip)
 {
     Derived a = { 5, 6 };
     Derived b = roundtrip(a);
@@ -250,6 +236,101 @@ TEST(metafast, roundtrip_float)
 
     a = 508;
     b = roundtrip(a);
+    ASSERT_EQ(a, b);
+}
+
+struct StructWithDefaults
+{
+    int a = 5;
+    std::vector<float> b = { 1.0f, 2.0f, 3.0f };
+    int c[3] = { 4, 5, 6 };
+
+    bool operator==(const StructWithDefaults & other) const
+    {
+        return a == other.a && b == other.b && std::equal(c, c + 3, other.c);
+    }
+    bool operator!=(const StructWithDefaults & other) const
+    {
+        return !(*this == other);
+    }
+};
+
+REFLECT_CLASS_START(StructWithDefaults, 0)
+    REFLECT_MEMBER(a)
+    REFLECT_MEMBER(b)
+    REFLECT_MEMBER(c)
+REFLECT_CLASS_END()
+
+TEST(metafast, defaults)
+{
+    StructWithDefaults a;
+    StructWithDefaults b = roundtrip(a);
+    ASSERT_EQ(a, b);
+
+    ++a.a;
+    b = roundtrip(a);
+    ASSERT_EQ(a, b);
+    --a.a;
+
+    a.b.push_back(5.0f);
+    b = roundtrip(a);
+    ASSERT_EQ(a, b);
+    a.b.pop_back();
+
+    --a.c[2];
+    b = roundtrip(a);
+    ASSERT_EQ(a, b);
+
+    a.b.push_back(6.0f);
+    b = roundtrip(a);
+    ASSERT_EQ(a, b);
+}
+
+struct DerivedWithDefaults : StructWithDefaults
+{
+    bool d = true;
+
+    bool operator==(const DerivedWithDefaults & other) const
+    {
+        return d == other.d && StructWithDefaults::operator==(other);
+    }
+    bool operator!=(const DerivedWithDefaults & other) const
+    {
+        return !(*this == other);
+    }
+};
+
+REFLECT_CLASS_START(DerivedWithDefaults, 0)
+    REFLECT_BASE(StructWithDefaults)
+    REFLECT_MEMBER(d)
+REFLECT_CLASS_END()
+
+TEST(metafast, default_base)
+{
+    DerivedWithDefaults a;
+    DerivedWithDefaults b = roundtrip(a);
+    ASSERT_EQ(a, b);
+
+    a.d = false;
+    b = roundtrip(a);
+    ASSERT_EQ(a, b);
+
+    a.d = true;
+    a.b.push_back(5.0f);
+    b = roundtrip(a);
+    ASSERT_EQ(a, b);
+
+    a.d = false;
+    b = roundtrip(a);
+    ASSERT_EQ(a, b);
+}
+
+TEST(metafast, two_defaults)
+{
+    std::vector<DerivedWithDefaults> a(2);
+    a[1].b.push_back(6.0f);
+
+    std::vector<DerivedWithDefaults> b = roundtrip(a);
     ASSERT_EQ(a, b);
 }
 
