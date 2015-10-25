@@ -43,9 +43,9 @@ template<>
 const MetaType MetaType::MetaTypeConstructor<memcpy_speed_comparison>::type = MetaType::RegisterStruct<memcpy_speed_comparison>("memcpy_speed_comparison", 0, &get_memcpy_speed_comparison_members);
 
 REFLECT_CLASS_START(memcpy_speed_comparison, 0)
-    REFLECT_MEMBER(vec)
-    REFLECT_MEMBER(i)
-    REFLECT_MEMBER(f)
+    REFLECT_MEMBER(vec);
+    REFLECT_MEMBER(i);
+    REFLECT_MEMBER(f);
 REFLECT_CLASS_END()
 
 void test_write_memcpy(const std::string & filename, const std::vector<memcpy_speed_comparison> & elements)

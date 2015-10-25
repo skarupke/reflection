@@ -13,9 +13,9 @@ struct HasMembers
 };
 
 REFLECT_CLASS_START(HasMembers, 0)
-    REFLECT_MEMBER(i)
-    REFLECT_MEMBER(f)
-    REFLECT_MEMBER(b)
+    REFLECT_MEMBER(i);
+    REFLECT_MEMBER(f);
+    REFLECT_MEMBER(b);
 REFLECT_CLASS_END()
 
 template<typename T>
@@ -163,7 +163,7 @@ struct StructWithVector
     std::vector<float> vec;
 };
 REFLECT_CLASS_START(StructWithVector, 0)
-    REFLECT_MEMBER(vec)
+    REFLECT_MEMBER(vec);
 REFLECT_CLASS_END()
 
 TEST(metafast, vector)
@@ -214,11 +214,11 @@ private:
 };
 
 REFLECT_CLASS_START(Base, 0)
-    REFLECT_MEMBER(foo)
+    REFLECT_MEMBER(foo);
 REFLECT_CLASS_END()
 REFLECT_CLASS_START(Derived, 0)
-    REFLECT_BASE(Base)
-    REFLECT_MEMBER(bar)
+    REFLECT_BASE(Base);
+    REFLECT_MEMBER(bar);
 REFLECT_CLASS_END()
 
 TEST(metafast, base)
@@ -256,9 +256,9 @@ struct StructWithDefaults
 };
 
 REFLECT_CLASS_START(StructWithDefaults, 0)
-    REFLECT_MEMBER(a)
-    REFLECT_MEMBER(b)
-    REFLECT_MEMBER(c)
+    REFLECT_MEMBER(a);
+    REFLECT_MEMBER(b);
+    REFLECT_MEMBER(c);
 REFLECT_CLASS_END()
 
 TEST(metafast, defaults)
@@ -301,8 +301,8 @@ struct DerivedWithDefaults : StructWithDefaults
 };
 
 REFLECT_CLASS_START(DerivedWithDefaults, 0)
-    REFLECT_BASE(StructWithDefaults)
-    REFLECT_MEMBER(d)
+    REFLECT_BASE(StructWithDefaults);
+    REFLECT_MEMBER(d);
 REFLECT_CLASS_END()
 
 TEST(metafast, default_base)
@@ -331,6 +331,171 @@ TEST(metafast, two_defaults)
     a[1].b.push_back(6.0f);
 
     std::vector<DerivedWithDefaults> b = roundtrip(a);
+    ASSERT_EQ(a, b);
+}
+
+struct SixtyFourMembers
+{
+    SixtyFourMembers()
+    {
+        std::fill(all64, all64 + 64, 0);
+    }
+
+    union
+    {
+        struct
+        {
+            int i0;
+            int i1;
+            int i2;
+            int i3;
+            int i4;
+            int i5;
+            int i6;
+            int i7;
+            int i8;
+            int i9;
+            int i10;
+            int i11;
+            int i12;
+            int i13;
+            int i14;
+            int i15;
+            int i16;
+            int i17;
+            int i18;
+            int i19;
+            int i20;
+            int i21;
+            int i22;
+            int i23;
+            int i24;
+            int i25;
+            int i26;
+            int i27;
+            int i28;
+            int i29;
+            int i30;
+            int i31;
+            int i32;
+            int i33;
+            int i34;
+            int i35;
+            int i36;
+            int i37;
+            int i38;
+            int i39;
+            int i40;
+            int i41;
+            int i42;
+            int i43;
+            int i44;
+            int i45;
+            int i46;
+            int i47;
+            int i48;
+            int i49;
+            int i50;
+            int i51;
+            int i52;
+            int i53;
+            int i54;
+            int i55;
+            int i56;
+            int i57;
+            int i58;
+            int i59;
+            int i60;
+            int i61;
+            int i62;
+            int i63;
+        };
+        int all64[64];
+    };
+
+    bool operator==(const SixtyFourMembers & other) const
+    {
+        return std::equal(all64, all64 + 64, other.all64);
+    }
+    bool operator!=(const SixtyFourMembers & other) const
+    {
+        return !(*this == other);
+    }
+};
+
+REFLECT_CLASS_START(SixtyFourMembers, 0)
+    REFLECT_MEMBER(i0);
+    REFLECT_MEMBER(i1);
+    REFLECT_MEMBER(i2);
+    REFLECT_MEMBER(i3);
+    REFLECT_MEMBER(i4);
+    REFLECT_MEMBER(i5);
+    REFLECT_MEMBER(i6);
+    REFLECT_MEMBER(i7);
+    REFLECT_MEMBER(i8);
+    REFLECT_MEMBER(i9);
+    REFLECT_MEMBER(i10);
+    REFLECT_MEMBER(i11);
+    REFLECT_MEMBER(i12);
+    REFLECT_MEMBER(i13);
+    REFLECT_MEMBER(i14);
+    REFLECT_MEMBER(i15);
+    REFLECT_MEMBER(i16);
+    REFLECT_MEMBER(i17);
+    REFLECT_MEMBER(i18);
+    REFLECT_MEMBER(i19);
+    REFLECT_MEMBER(i20);
+    REFLECT_MEMBER(i21);
+    REFLECT_MEMBER(i22);
+    REFLECT_MEMBER(i23);
+    REFLECT_MEMBER(i24);
+    REFLECT_MEMBER(i25);
+    REFLECT_MEMBER(i26);
+    REFLECT_MEMBER(i27);
+    REFLECT_MEMBER(i28);
+    REFLECT_MEMBER(i29);
+    REFLECT_MEMBER(i30);
+    REFLECT_MEMBER(i31);
+    REFLECT_MEMBER(i32);
+    REFLECT_MEMBER(i33);
+    REFLECT_MEMBER(i34);
+    REFLECT_MEMBER(i35);
+    REFLECT_MEMBER(i36);
+    REFLECT_MEMBER(i37);
+    REFLECT_MEMBER(i38);
+    REFLECT_MEMBER(i39);
+    REFLECT_MEMBER(i40);
+    REFLECT_MEMBER(i41);
+    REFLECT_MEMBER(i42);
+    REFLECT_MEMBER(i43);
+    REFLECT_MEMBER(i44);
+    REFLECT_MEMBER(i45);
+    REFLECT_MEMBER(i46);
+    REFLECT_MEMBER(i47);
+    REFLECT_MEMBER(i48);
+    REFLECT_MEMBER(i49);
+    REFLECT_MEMBER(i50);
+    REFLECT_MEMBER(i51);
+    REFLECT_MEMBER(i52);
+    REFLECT_MEMBER(i53);
+    REFLECT_MEMBER(i54);
+    REFLECT_MEMBER(i55);
+    REFLECT_MEMBER(i56);
+    REFLECT_MEMBER(i57);
+    REFLECT_MEMBER(i58);
+    REFLECT_MEMBER(i59);
+    REFLECT_MEMBER(i60);
+    REFLECT_MEMBER(i61);
+    REFLECT_MEMBER(i62);
+    REFLECT_MEMBER(i63);
+REFLECT_CLASS_END()
+
+TEST(metafast, sixty_four_members)
+{
+    SixtyFourMembers a;
+    a.i31 = 2;
+    a.i63 = 1;
+    SixtyFourMembers b = roundtrip(a);
     ASSERT_EQ(a, b);
 }
 

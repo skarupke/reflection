@@ -74,43 +74,48 @@ struct BinaryInput
 
 
 template<typename T, typename Ar>
-void reflect_registered_class(Ar & archive, int16_t version);
+void reflect_registered_class(Ar & archive, int8_t version);
 template<typename T>
-int16_t get_current_version();
+int8_t get_current_version();
 
 #define REFLECT_CLASS_START(type, current_version)\
 namespace metaf\
 {\
 template<>\
-inline int16_t (get_current_version<type>)() { return current_version; }\
+inline int8_t (get_current_version<type>)() { return current_version; }\
 }\
 \
 template<template<typename> class Ar, typename T>\
 struct reflect_ ## type\
 {\
-    void operator()(Ar<T> & archive, int16_t version) const;\
+    void operator()(Ar<T> & archive, int8_t version) const;\
 };\
 namespace metaf\
 {\
 template<>\
-void reflect_registered_class<type, ::metaf::OptimisticBinaryDeserializer<type>>(OptimisticBinaryDeserializer<type> & archive, int16_t version)\
+void reflect_registered_class<type, OptimisticBinaryDeserializer<type>>(OptimisticBinaryDeserializer<type> & archive, int8_t version)\
 {\
+    MemberCounter<type> count_members;\
+    reflect_ ## type<MemberCounter, type>()(count_members, version);\
+    archive.member_count = count_members.get_count();\
     return reflect_ ## type<OptimisticBinaryDeserializer, type>()(archive, version);\
 }\
 template<>\
-void reflect_registered_class<type, ::metaf::OptimisticBinarySerializer<type>>(OptimisticBinarySerializer<type> & archive, int16_t version)\
+void reflect_registered_class<type, OptimisticBinarySerializer<type>>(OptimisticBinarySerializer<type> & archive, int8_t version)\
 {\
+    MemberCounter<type> count_members;\
+    reflect_ ## type<MemberCounter, type>()(count_members, version);\
+    archive.member_count = count_members.get_count();\
     return reflect_ ## type<OptimisticBinarySerializer, type>()(archive, version);\
 }\
 }\
 template<template<typename> class Ar, typename T>\
-void reflect_ ## type<Ar, T>::operator()(Ar<T> & archive, int16_t version) const\
+void reflect_ ## type<Ar, T>::operator()(Ar<T> & archive, int8_t version) const\
 {\
-    static_cast<void>(version);\
-    archive
-#define REFLECT_MEMBER(member_name) .member(#member_name, &T::member_name)
-#define REFLECT_BASE(class_name) .template base<class_name>()
-#define REFLECT_CLASS_END() .finish();\
+    archive.begin(version);
+#define REFLECT_MEMBER(member_name) archive.member(#member_name, &T::member_name)
+#define REFLECT_BASE(class_name) archive.template base<class_name>()
+#define REFLECT_CLASS_END() archive.finish();\
 }
 #define FRIEND_REFLECT_CLASSES(type) template<template<typename> class, typename> friend struct reflect_ ## type
 
@@ -619,65 +624,117 @@ simple_reference(float)
 }
 
 template<typename T>
+struct MemberCounter
+{
+    void begin(int8_t)
+    {
+    }
+    template<typename M>
+    void member(Range<const char>, M T::*)
+    {
+        increment_count();
+    }
+    template<typename B>
+    void base()
+    {
+        increment_count();
+    }
+    void finish()
+    {
+    }
+
+    uint8_t get_count() const
+    {
+        return count;
+    }
+
+private:
+    uint8_t count = 0;
+
+    void increment_count()
+    {
+        ++count;
+#ifndef FINAL
+        if (count > 64)
+            assert_count();
+#endif
+    }
+
+    __attribute__((noinline)) void assert_count()
+    {
+        RAW_ASSERT(count <= 64, "Serialization only supports structs with up to 64 members. This is required to only use one bit of overhead per member. Can you move some members to a nested struct?");
+    }
+};
+
+template<typename T>
 struct OptimisticBinaryDeserializer
 {
     OptimisticBinaryDeserializer(T & object, BinaryInput & input)
         : object(object), input(input)
     {
     }
-    ~OptimisticBinaryDeserializer()
+
+    void begin(int8_t)
     {
-        if (!read_any_members)
+        if (member_count == 0)
+            return;
+        else if (member_count <= 8)
         {
-            uint8_t zero = 0;
-            detail::reference(input, zero);
-            RAW_ASSERT(zero == 0);
+            uint8_t flags = 0;
+            detail::memcpy_reference(input, flags);
+            member_flags = flags;
+        }
+        else if (member_count <= 16)
+        {
+            uint16_t flags = 0;
+            detail::memcpy_reference(input, flags);
+            member_flags = flags;
+        }
+        else if (member_count <= 32)
+        {
+            uint32_t flags = 0;
+            detail::memcpy_reference(input, flags);
+            member_flags = flags;
+        }
+        else
+        {
+            detail::memcpy_reference(input, member_flags);
         }
     }
 
     template<typename M>
-    OptimisticBinaryDeserializer & member(Range<const char>, M T::*m)
+    void member(Range<const char>, M T::*m)
     {
-        if (!should_skip_member())
+        if (should_read_member())
         {
             read_member(m);
         }
-        return *this;
+        ++current_member;
     }
     template<typename B>
-    OptimisticBinaryDeserializer & base()
+    void base()
     {
-        if (!should_skip_member())
+        if (should_read_member())
         {
             detail::reference(input, static_cast<B &>(object));
         }
-        return *this;
+        ++current_member;
     }
     void finish()
     {
     }
 
+    uint8_t member_count;
+
 private:
     T & object;
     BinaryInput & input;
-    uint8_t current_member = 1;
-    bool read_any_members = false;
+    uint8_t current_member = 0;
+    uint64_t member_flags = 0;
 
-    bool should_skip_member()
+    bool should_read_member()
     {
-        uint8_t member_index = 0;
-        detail::reference(input, member_index);
-        bool skip = member_index != current_member;
-        if (skip)
-        {
-            input.step_back(member_index);
-        }
-        else
-        {
-            read_any_members = true;
-        }
-        ++current_member;
-        return skip;
+        return member_flags & (1ull << current_member);
     }
 
     template<typename M>
@@ -696,16 +753,18 @@ struct OptimisticBinarySerializer
 {
     OptimisticBinarySerializer(const T & object, std::ostream & output, const T & defaults)
         : object(object), defaults(defaults), output(output)
+        , position_to_write_flag(output.tellp())
     {
     }
-    ~OptimisticBinarySerializer()
+
+    void begin(int8_t)
     {
-        if (!wrote_any_members)
-            detail::reference(output, uint8_t(0));
+        if (member_count != 0)
+            write_flag();
     }
 
     template<typename M>
-    OptimisticBinarySerializer & member(Range<const char>, M T::*m)
+    void member(Range<const char>, M T::*m)
     {
         if (!detail::is_default(object, m, defaults))
         {
@@ -713,10 +772,9 @@ struct OptimisticBinarySerializer
             write_member(m);
         }
         after_member();
-        return *this;
     }
     template<typename B>
-    OptimisticBinarySerializer & base()
+    void base()
     {
         if (!detail::is_default(static_cast<const B &>(object), static_cast<const B &>(defaults)))
         {
@@ -724,28 +782,46 @@ struct OptimisticBinarySerializer
             detail::serialize_struct(output, static_cast<const B &>(object), static_cast<const B &>(defaults));
         }
         after_member();
-        return *this;
     }
     void finish()
     {
+        if (member_count == 0)
+            return;
+        std::ostream::pos_type position_now = output.tellp();
+        output.seekp(position_to_write_flag);
+        write_flag();
+        output.seekp(position_now);
     }
+
+    uint8_t member_count;
 
 private:
     const T & object;
     const T & defaults;
     std::ostream & output;
-    uint8_t current_member = 1;
-    bool wrote_any_members = false;
+    uint8_t current_member = 0;
+    uint64_t flag_to_write = 0;
+    std::ostream::pos_type position_to_write_flag;
+
+    void write_flag()
+    {
+        if (member_count <= 8)
+            detail::memcpy_reference(output, uint8_t(flag_to_write));
+        else if (member_count <= 16)
+            detail::memcpy_reference(output, uint16_t(flag_to_write));
+        else if (member_count <= 32)
+            detail::memcpy_reference(output, uint32_t(flag_to_write));
+        else
+            detail::memcpy_reference(output, flag_to_write);
+    }
 
     void write_member_start()
     {
-        detail::reference(output, current_member);
-        wrote_any_members = true;
+        flag_to_write |= 1ull << current_member;
     }
     void after_member()
     {
         ++current_member;
-        RAW_ASSERT(current_member != std::numeric_limits<uint8_t>::max(), "Serialization only supports structs with up to 254 members. This is required to only use one byte of overhead per member. Can you move some members to a nested struct?");
     }
 
     template<typename M>
@@ -759,5 +835,4 @@ private:
         detail::array(output, object.*m, object.*m + Size);
     }
 };
-
 }
