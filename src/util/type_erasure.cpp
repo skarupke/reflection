@@ -77,10 +77,6 @@ struct LargerEnoughToStompTheStack
     {
         return std::equal(std::begin(a), std::end(a), std::begin(other.a));
     }
-    bool operator!=(const LargerEnoughToStompTheStack & other) const
-    {
-        return !(*this == other);
-    }
 };
 
 TEST(type_erasure, heap_allocated)

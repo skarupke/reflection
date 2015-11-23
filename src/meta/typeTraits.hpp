@@ -20,8 +20,8 @@ template<typename T>
 struct remove_pointer : std::remove_pointer<T>
 {
 };
-template<typename T>
-struct remove_pointer<std::unique_ptr<T>>
+template<typename T, typename D>
+struct remove_pointer<std::unique_ptr<T, D>>
 {
 	typedef T type;
 };

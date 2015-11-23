@@ -5,35 +5,28 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
-void evict_file_from_os_cache(int file_descriptor)
+UnixFile::UnixFile(StringView<const char> filename, int flags)
+    : file_descriptor(open(filename.begin(), flags))
+{
+}
+UnixFile::UnixFile(StringView<const char> filename, int flags, int mode)
+    : file_descriptor(open(filename.begin(), flags, mode))
+{
+}
+UnixFile::~UnixFile()
+{
+    if (file_descriptor >= 0)
+        close(file_descriptor);
+}
+void UnixFile::evict_from_os_cache()
 {
     fdatasync(file_descriptor);
     posix_fadvise(file_descriptor, 0, 0, POSIX_FADV_DONTNEED);
 }
 
-struct UnixFile
-{
-    UnixFile(Range<const char> filename, int flags)
-        : file_descriptor(open(filename.begin(), flags))
-    {
-    }
-    ~UnixFile()
-    {
-        if (file_descriptor >= 0)
-            close(file_descriptor);
-    }
-
-    bool is_valid() const
-    {
-        return file_descriptor >= 0;
-    }
-
-    int file_descriptor = -1;
-};
-
 struct MMappedFileRead::Internals
 {
-    Internals(Range<const char> filename)
+    Internals(StringView<const char> filename)
         : file(filename, O_RDONLY)
     {
         if (!file.is_valid())
@@ -58,21 +51,21 @@ struct MMappedFileRead::Internals
     }
 
     UnixFile file;
-    Range<unsigned char> file_contents;
+    ArrayView<unsigned char> file_contents;
 };
 
-MMappedFileRead::MMappedFileRead(Range<const char> filename)
+MMappedFileRead::MMappedFileRead(StringView<const char> filename)
     : internals(new Internals(filename))
 {
 }
 MMappedFileRead::~MMappedFileRead() = default;
 
-Range<const unsigned char> MMappedFileRead::get_bytes() const
+ArrayView<const unsigned char> MMappedFileRead::get_bytes() const
 {
     return internals->file_contents;
 }
 
-void MMappedFileRead::clear_and_evict_from_os_cache()
+void MMappedFileRead::close_and_evict_from_os_cache()
 {
     if (!internals->file_contents.empty())
     {
@@ -80,6 +73,6 @@ void MMappedFileRead::clear_and_evict_from_os_cache()
         internals->file_contents = {};
     }
     if (internals->file.is_valid())
-        evict_file_from_os_cache(internals->file.file_descriptor);
+        internals->file.evict_from_os_cache();
 }
 

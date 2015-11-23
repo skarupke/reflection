@@ -29,19 +29,19 @@ struct MetaType::MapInfo::Creator<std::multimap<K, V, C, A>>
         {
             GetMetaType<K>(),
             GetMetaType<V>(),
-            [](const MetaReference & object) -> size_t
+            [](ConstMetaReference object) -> size_t
             {
                 return object.Get<Self>().size();
             },
-            [](MetaReference & object, MetaReference && key, MetaReference && value) -> std::pair<MapIterator, bool>
+            [](MetaReference object, MetaReference && key, MetaReference && value) -> std::pair<MapIterator, bool>
             {
                 return { object.Get<Self>().insert(std::make_pair(std::move(key.Get<K>()), std::move(value.Get<V>()))), true };
             },
-            [](const MetaReference & object) -> MapIterator
+            [](ConstMetaReference object) -> MapIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).begin();
             },
-            [](const MetaReference & object) -> MapIterator
+            [](ConstMetaReference object) -> MapIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).end();
             }

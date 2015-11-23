@@ -39,6 +39,28 @@ TYPED_TEST_P(SerializationTest, simple)
 #undef SIMPLE_TEST
 }
 
+TYPED_TEST_P(SerializationTest, all_the_int_types)
+{
+    parse_test<TypeParam>(static_cast<signed char>(1));
+    parse_test<TypeParam>(static_cast<unsigned char>(2));
+
+    parse_test<TypeParam>(static_cast<signed short>(3));
+    parse_test<TypeParam>(static_cast<short>(4));
+    parse_test<TypeParam>(static_cast<unsigned short>(5));
+
+    parse_test<TypeParam>(static_cast<signed>(6));
+    parse_test<TypeParam>(static_cast<int>(7));
+    parse_test<TypeParam>(static_cast<unsigned>(8));
+
+    parse_test<TypeParam>(static_cast<signed long>(9));
+    parse_test<TypeParam>(static_cast<long>(10));
+    parse_test<TypeParam>(static_cast<unsigned long>(11));
+
+    parse_test<TypeParam>(static_cast<signed long long>(12));
+    parse_test<TypeParam>(static_cast<long long>(13));
+    parse_test<TypeParam>(static_cast<unsigned long long>(14));
+}
+
 TYPED_TEST_P(SerializationTest, list)
 {
     parse_test<TypeParam>(std::vector<int>());
@@ -59,7 +81,7 @@ TYPED_TEST_P(SerializationTest, string)
 {
     parse_test<TypeParam>(std::string("Hello,\nWorld!"));
     parse_test<TypeParam>(std::string("π𝄞 "));
-    parse_test<TypeParam>(Range<const char>("range test"));
+    parse_test<TypeParam>(StringView<const char>("range test"));
     parse_test<TypeParam>('\'');
     parse_test<TypeParam>('\n');
     parse_test<TypeParam>('c');
@@ -125,7 +147,7 @@ struct derived_struct : base_struct_a, base_struct_b
 
 struct base_struct_d
 {
-    base_struct_d(int d = 0)
+    base_struct_d(int d)
         : d(d)
     {
     }
@@ -247,6 +269,7 @@ struct pointer_member
         else return !other.ptr;
     }
 };
+#ifdef META_SUPPORTS_CONDITIONAL_MEMBER
 struct conditional_member
 {
     conditional_member(bool which = true, int i = 0)
@@ -264,6 +287,9 @@ struct conditional_member
     int b = 0;
     bool which;
 };
+#endif
+
+#ifdef META_SUPPORTS_TYPE_ERASURE
 struct type_erasure
 {
     type_erasure() = default;
@@ -351,6 +377,7 @@ struct type_erasure_member
     }
     int a = 0;
 };
+#endif
 }
 TYPED_TEST_P(SerializationTest, pointer_member)
 {
@@ -358,20 +385,32 @@ TYPED_TEST_P(SerializationTest, pointer_member)
     parse_test<TypeParam>(srlztest::pointer_member(5, 6, 7));
 }
 
+#ifdef META_SUPPORTS_CONDITIONAL_MEMBER
 TYPED_TEST_P(SerializationTest, conditional_member)
 {
     parse_test<TypeParam>(srlztest::conditional_member(true, 1));
     parse_test<TypeParam>(srlztest::conditional_member(false, 1));
 }
+#else
+TYPED_TEST_P(SerializationTest, conditional_member)
+{
+}
+#endif
 
+#ifdef META_SUPPORTS_TYPE_ERASURE
 TYPED_TEST_P(SerializationTest, type_erasure)
 {
     parse_test<TypeParam>(srlztest::type_erasure(srlztest::type_erasure_member(5)));
 }
+#else
+TYPED_TEST_P(SerializationTest, type_erasure)
+{
+}
+#endif
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-REGISTER_TYPED_TEST_CASE_P(SerializationTest, simple, list, map, string, enum_test, derived_two_levels, pointer_to_struct, pointer_member, conditional_member, type_erasure);
+REGISTER_TYPED_TEST_CASE_P(SerializationTest, simple, all_the_int_types, list, map, string, enum_test, derived_two_levels, pointer_to_struct, pointer_member, conditional_member, type_erasure);
 #pragma GCC diagnostic pop
 
 #endif

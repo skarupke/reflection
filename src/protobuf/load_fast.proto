@@ -1,0 +1,21 @@
+package test;
+
+message Vec4
+{
+    required float f0 = 1;
+    required float f1 = 2;
+    required float f2 = 3;
+    required float f3 = 4;
+}
+
+message LoadFastTest
+{
+    required Vec4 vec = 1;
+    required int32 i = 2;
+    required float f = 3;
+}
+
+message Array
+{
+    repeated LoadFastTest array = 1;
+}

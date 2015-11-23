@@ -14,7 +14,7 @@ namespace metav3
 
 namespace detail
 {
-void assert_range_size_and_alignment(Range<unsigned char> memory, size_t size, size_t alignment)
+void assert_range_size_and_alignment(ArrayView<unsigned char> memory, size_t size, size_t alignment)
 {
     static_cast<void>(memory); static_cast<void>(size); static_cast<void>(alignment);
     RAW_ASSERT(memory.size() == size && (reinterpret_cast<uintptr_t>(memory.begin()) % alignment) == 0);
@@ -29,7 +29,7 @@ MetaType::MetaType(StringInfo string_info, GeneralInformation general)
     : category(String), string_info(std::move(string_info)), general(std::move(general))
 {
 }
-MetaType::MetaType(GeneralInformation general, std::map<int32_t, HashedString> enum_values)
+MetaType::MetaType(GeneralInformation general, std::map<int32_t, std::string> enum_values)
     : category(Enum), enum_info(std::move(enum_values)), general(std::move(general))
 {
 }
@@ -54,7 +54,7 @@ namespace
 {
 struct GlobalStructStorage
 {
-    const MetaType & GetByName(const HashedString & name) const
+    const MetaType & GetByName(const ReflectionHashedString & name) const
     {
         std::lock_guard<std::mutex> lock(mutex);
         auto found = by_name.find(name);
@@ -68,7 +68,7 @@ struct GlobalStructStorage
         if (found == by_type.end()) RAW_THROW(std::runtime_error("tried to get a type that wasn't registered"));
         else return *found->second;
     }
-    const HashedString & GetStoredName(Range<const char> name) const
+    const ReflectionHashedString & GetStoredName(StringView<const char> name) const
     {
         std::lock_guard<std::mutex> lock(mutex);
         auto found = stored_names.find(name);
@@ -86,7 +86,7 @@ struct GlobalStructStorage
     {
         RAW_ASSERT(to_add.category == MetaType::Struct);
         std::lock_guard<std::mutex> lock(mutex);
-        const HashedString & name = to_add.GetStructInfo()->GetName();
+        const ReflectionHashedString & name = to_add.GetStructInfo()->GetName();
         RAW_VERIFY(by_name.emplace(name, &to_add).second); // this will trigger if you register two structs with the same name
         RAW_VERIFY(by_type.emplace(to_add.GetTypeInfo(), &to_add).second); // this will trigger if you register a struct under two different names
         RAW_VERIFY(stored_names.emplace(name.get(), name).second);
@@ -95,9 +95,9 @@ struct GlobalStructStorage
 
 private:
     mutable std::mutex mutex;
-    std::map<HashedString, const MetaType *> by_name;
+    std::map<ReflectionHashedString, const MetaType *> by_name;
     std::map<std::type_index, const MetaType *> by_type;
-    std::unordered_map<Range<const char>, HashedString> stored_names;
+    std::unordered_map<StringView<const char>, ReflectionHashedString> stored_names;
     std::unordered_map<uint32_t, const MetaType *> by_hash;
 };
 GlobalStructStorage & GetGlobalStructStorage()
@@ -222,31 +222,27 @@ MetaType::~MetaType()
         break;
     }
 }
-MetaType::StringInfo::StringInfo(Range<const char> (*get_as_range)(const MetaReference &), void (*set_from_range)(MetaReference &, Range<const char>))
+MetaType::StringInfo::StringInfo(StringView<const char> (*get_as_range)(ConstMetaReference), void (*set_from_range)(MetaReference, StringView<const char>))
     : get_as_range(get_as_range), set_from_range(set_from_range)
 {
 }
 
-MetaType::EnumInfo::EnumInfo(std::map<int32_t, HashedString> values)
+MetaType::EnumInfo::EnumInfo(std::map<int32_t, std::string> values)
     : values(std::move(values))
 {
     for (const auto & pair : this->values)
     {
-        int_values[pair.second.get()] = pair.first;
+        int_values[pair.second] = pair.first;
     }
 }
 
-MetaType::ArrayInfo::ArrayInfo(const MetaType & value_type, size_t array_size, MetaRandomAccessIterator (*begin)(MetaReference &))
+MetaType::ArrayInfo::ArrayInfo(const MetaType & value_type, size_t array_size, MetaRandomAccessIterator (*begin)(MetaReference))
     : begin(begin), value_type(value_type), array_size(array_size)
 {
 }
-MetaType::StructInfo::StructInfo(HashedString name, int16_t current_version, GetMembersFunction get_members, GetBaseClassesFunction get_bases)
-    : name(std::move(name)), current_version(current_version), get_members(get_members), get_bases(get_bases)
+MetaType::StructInfo::StructInfo(ReflectionHashedString name, int8_t current_version, GetInfoFunction get_both)
+    : name(std::move(name)), current_version(current_version), get_both(get_both)
 {
-}
-MetaType::StructInfo::BaseClassCollection MetaType::StructInfo::NoBaseClasses(int16_t)
-{
-    return {{}};
 }
 
 MetaType::PointerToStructInfo::PointerToStructInfo(const MetaType & target_type, pointer_function get_as_pointer, assign_function assign)
@@ -278,7 +274,7 @@ MetaReference MetaType::PointerToStructInfo::cast_reference(const MetaType & str
         return MetaReference(struct_type, { new_begin, new_end });
     }
 }
-MetaReference MetaType::PointerToStructInfo::AssignNew(MetaReference & pointer, const MetaType & type) const
+MetaReference MetaType::PointerToStructInfo::AssignNew(MetaReference pointer, const MetaType & type) const
 {
     allocate_pointer memory = type.Allocate();
     MetaReference as_reference(type, { memory.get(), memory.get() + type.GetSize() });
@@ -308,7 +304,7 @@ MetaReference MetaType::TypeErasureInfo::Assign(MetaReference type_erasure, Meta
     RAW_ASSERT(found != GetSupportedTypes().end());
     return found->second.assign(type_erasure, std::move(target));
 }
-MetaReference MetaType::TypeErasureInfo::AssignNew(MetaReference & pointer, const MetaType & type) const
+MetaReference MetaType::TypeErasureInfo::AssignNew(MetaReference pointer, const MetaType & type) const
 {
     unsigned char * stack_memory = static_cast<unsigned char *>(alloca(type.GetSize()));
     MetaOwningMemory memory(type, { stack_memory, stack_memory + type.GetSize() });
@@ -321,7 +317,7 @@ std::map<std::pair<const MetaType *, const MetaType *>, MetaType::TypeErasureInf
     return supported_types;
 }
 
-const MetaType & MetaType::GetStructType(const HashedString & name)
+const MetaType & MetaType::GetStructType(const ReflectionHashedString & name)
 {
     return global_struct_storage.GetByName(name);
 }
@@ -329,7 +325,7 @@ const MetaType & MetaType::GetStructType(const std::type_info & type)
 {
     return global_struct_storage.GetByType(type);
 }
-const HashedString & MetaType::GetRegisteredStructName(Range<const char> name)
+const ReflectionHashedString & MetaType::GetRegisteredStructName(StringView<const char> name)
 {
     return global_struct_storage.GetStoredName(name);
 }
@@ -338,19 +334,19 @@ const MetaType & MetaType::GetRegisteredStruct(uint32_t hash)
     return global_struct_storage.GetByHash(hash);
 }
 
-int32_t MetaType::EnumInfo::GetAsInt(const MetaReference & reference) const
+int32_t MetaType::EnumInfo::GetAsInt(ConstMetaReference reference) const
 {
     RAW_ASSERT(reference.GetType().GetEnumInfo() == this);
     return *reinterpret_cast<const int32_t *>(reference.GetMemory().begin());
 }
-const HashedString & MetaType::EnumInfo::GetAsHashedString(const MetaReference & reference) const
+const std::string & MetaType::EnumInfo::GetAsString(ConstMetaReference reference) const
 {
     RAW_ASSERT(reference.GetType().GetEnumInfo() == this);
     auto found = values.find(GetAsInt(reference));
     if (found != values.end()) return found->second;
     else RAW_THROW(std::runtime_error("invalid value for enum"));
 }
-void MetaType::EnumInfo::SetFromString(MetaReference & to_fill, const std::string & value) const
+void MetaType::EnumInfo::SetFromString(MetaReference to_fill, const std::string & value) const
 {
     auto found = int_values.find(value);
     if (found == int_values.end()) RAW_THROW(std::runtime_error("invalid text value for enum"));
@@ -377,7 +373,7 @@ const ClassHeaderList & MetaType::StructInfo::GetCurrentHeaders() const
 #			endif
             lhs.insert(lhs.end(), base.begin(), base.end());
         };
-        return foldl(get_bases(GetCurrentVersion()).bases, std::move(headers), add_base);
+        return foldl(GetDirectBaseClasses(GetCurrentVersion()).bases, std::move(headers), add_base);
     });
 }
 
@@ -386,12 +382,12 @@ MetaType::StructInfo::AllMemberCollection::AllMemberCollection(MemberCollection 
 {
 }
 
-const MetaType::StructInfo::BaseClassCollection & MetaType::StructInfo::GetDirectBaseClasses(int16_t version) const
+const MetaType::StructInfo::BaseClassCollection & MetaType::StructInfo::GetDirectBaseClasses(int8_t version) const
 {
     if (version > GetCurrentVersion()) RAW_THROW(std::runtime_error("wrong version"));
-    return direct_bases.get(version, [&](int16_t version)
+    return direct_bases.get(version, [&](int8_t version)
     {
-        return get_bases(version);
+        return get_both(version).bases;
     });
 }
 
@@ -429,12 +425,12 @@ const MetaType::StructInfo::BaseClassCollection & MetaType::StructInfo::GetAllBa
     });
 }
 
-const MetaType::StructInfo::MemberCollection & MetaType::StructInfo::GetDirectMembers(int16_t version) const
+const MetaType::StructInfo::MemberCollection & MetaType::StructInfo::GetDirectMembers(int8_t version) const
 {
     if (version > GetCurrentVersion()) RAW_THROW(std::runtime_error("wrong version"));
-    return direct_members.get(version, [&](int16_t version)
+    return direct_members.get(version, [&](int8_t version)
     {
-        return get_members(version);
+        return get_both(version).members;
     });
 }
 
@@ -523,25 +519,27 @@ CreateSimpleType(int8_t, Int8);
 CreateSimpleType(uint8_t, Uint8);
 CreateSimpleType(int16_t, Int16);
 CreateSimpleType(uint16_t, Uint16);
-CreateSimpleType(int32_t, Int32);
-CreateSimpleType(uint32_t, Uint32);
-CreateSimpleType(int64_t, Int64);
-CreateSimpleType(uint64_t, Uint64);
+CreateSimpleType(int, Int32);
+CreateSimpleType(unsigned, Uint32);
+CreateSimpleType(long, Int64);
+CreateSimpleType(unsigned long, Uint64);
+CreateSimpleType(long long, Int64);
+CreateSimpleType(unsigned long long, Uint64);
 CreateSimpleType(float, Float);
 CreateSimpleType(double, Double);
 #undef CreateSimpleType
 template<>
-const MetaType MetaType::MetaTypeConstructor<Range<const char> >::type = MetaType::RegisterString<Range<const char> >();
+const MetaType MetaType::MetaTypeConstructor<StringView<const char> >::type = MetaType::RegisterString<StringView<const char> >();
 template<>
 const MetaType MetaType::MetaTypeConstructor<std::string>::type = MetaType::RegisterString<std::string>();
 template<>
 struct MetaType::StringInfo::Specialization<std::string>
 {
-    static Range<const char> GetAsRange(const MetaReference & ref)
+    static StringView<const char> GetAsRange(ConstMetaReference ref)
     {
         return ref.Get<std::string>();
     }
-    static void SetFromRange(MetaReference & ref, Range<const char> range)
+    static void SetFromRange(MetaReference ref, StringView<const char> range)
     {
         ref.Get<std::string>().assign(range.begin(), range.end());
     }
@@ -630,7 +628,7 @@ MetaType::StructInfo::BaseClassCollection::BaseClassCollection(std::vector<BaseC
     }
 }
 
-MetaConditionalMember::MetaConditionalMember(MetaMember member, bool (*condition)(const MetaReference & object))
+MetaConditionalMember::MetaConditionalMember(MetaMember member, bool (*condition)(ConstMetaReference object))
     : member(std::move(member)), condition(condition)
 {
     RAW_ASSERT(condition);
@@ -642,7 +640,7 @@ MetaConditionalMember::Condition::Condition(ConditionFunction condition)
 }
 
 
-ClassHeader::ClassHeader(HashedString class_name, int16_t version)
+ClassHeader::ClassHeader(ReflectionHashedString class_name, int8_t version)
     : class_name(std::move(class_name)), version(version)
 {
 }
@@ -678,7 +676,7 @@ ClassHeaderList::iterator ClassHeaderList::find(const ClassHeader & header)
 {
     return std::find(begin(), end(), header);
 }
-ClassHeaderList::iterator ClassHeaderList::find(const HashedString & class_name)
+ClassHeaderList::iterator ClassHeaderList::find(const ReflectionHashedString & class_name)
 {
     return std::find_if(begin(), end(), [&](const ClassHeader & header)
     {
@@ -690,7 +688,7 @@ ClassHeaderList::const_iterator ClassHeaderList::find(const ClassHeader & header
 {
     return const_cast<ClassHeaderList &>(*this).find(header);
 }
-ClassHeaderList::const_iterator ClassHeaderList::find(const HashedString & class_name) const
+ClassHeaderList::const_iterator ClassHeaderList::find(const ReflectionHashedString & class_name) const
 {
     return const_cast<ClassHeaderList &>(*this).find(class_name);
 }
@@ -1048,9 +1046,9 @@ struct small_struct
 
     int i;
 };
-static MetaType::StructInfo::MemberCollection CreateEmptyMemberCollection(int16_t)
+static MetaType::StructInfo::MembersAndBases CreateEmptyMemberCollection(int8_t)
 {
-    return {{}, {}};
+    return {{{}, {}}, {{}}};
 }
 }
 template<>
@@ -1071,16 +1069,22 @@ struct struct_with_members
     float b;
     std::vector<int> c;
 };
-static MetaType::StructInfo::MemberCollection get_struct_with_members_members(int16_t)
+static MetaType::StructInfo::MembersAndBases get_struct_with_members_members(int8_t)
 {
     return
     {
         {
-            MetaMember("a", &struct_with_members::a),
-            MetaMember("b", &struct_with_members::b),
-            MetaMember("c", &struct_with_members::c)
+            {
+                MetaMember("a", &struct_with_members::a),
+                MetaMember("b", &struct_with_members::b),
+                MetaMember("c", &struct_with_members::c)
+            },
+            {
+            }
         },
         {
+            {
+            }
         }
     };
 }
@@ -1229,11 +1233,11 @@ TEST(new_meta, enum)
     const MetaType::EnumInfo * info = as_reference.GetType().GetEnumInfo();
     ASSERT_TRUE(info);
     ASSERT_EQ(A, info->GetAsInt(as_reference));
-    ASSERT_EQ("A", info->GetAsHashedString(as_reference));
+    ASSERT_EQ("A", info->GetAsString(as_reference));
     ABC b = B;
     as_reference.Get<ABC>() = b;
     ASSERT_EQ(B, info->GetAsInt(as_reference));
-    ASSERT_EQ("B", info->GetAsHashedString(as_reference));
+    ASSERT_EQ("B", info->GetAsString(as_reference));
 }
 
 struct base_struct_a
@@ -1261,25 +1265,24 @@ struct derived_struct : base_struct_a, base_struct_b
     int c;
 };
 
-static MetaType::StructInfo::MemberCollection get_base_struct_a_members(int16_t)
+static MetaType::StructInfo::MembersAndBases get_base_struct_a_members(int8_t)
 {
-    return { { MetaMember("a", &base_struct_a::a) }, { } };
+    return { { { MetaMember("a", &base_struct_a::a) }, { } }, { { } } };
 }
-static MetaType::StructInfo::MemberCollection get_base_struct_b_members(int16_t)
+static MetaType::StructInfo::MembersAndBases get_base_struct_b_members(int8_t)
 {
-    return { { MetaMember("b", &base_struct_b::b) }, { } };
+    return { { { MetaMember("b", &base_struct_b::b) }, { } }, { { { } } } };
 }
-static MetaType::StructInfo::MemberCollection get_derived_struct_members(int16_t)
-{
-    return { { MetaMember("c", &derived_struct::c) }, { } };
-}
-static MetaType::StructInfo::BaseClassCollection get_derived_struct_bases(int16_t)
+static MetaType::StructInfo::MembersAndBases get_derived_struct_info(int8_t)
 {
     return
     {
+        { { MetaMember("c", &derived_struct::c) }, { } },
         {
-            BaseClass::Create<base_struct_a, derived_struct>(),
-            BaseClass::Create<base_struct_b, derived_struct>()
+            {
+                BaseClass::Create<base_struct_a, derived_struct>(),
+                BaseClass::Create<base_struct_b, derived_struct>()
+            }
         }
     };
 }
@@ -1289,7 +1292,7 @@ const MetaType MetaType::MetaTypeConstructor<base_struct_a>::type = MetaType::Re
 template<>
 const MetaType MetaType::MetaTypeConstructor<base_struct_b>::type = MetaType::RegisterStruct<base_struct_b>("base_struct_b", 0, &get_base_struct_b_members);
 template<>
-const MetaType MetaType::MetaTypeConstructor<derived_struct>::type = MetaType::RegisterStruct<derived_struct>("derived_struct", 0, &get_derived_struct_members, &get_derived_struct_bases);
+const MetaType MetaType::MetaTypeConstructor<derived_struct>::type = MetaType::RegisterStruct<derived_struct>("derived_struct", 0, &get_derived_struct_info);
 namespace
 {
 TEST(new_meta, derived)
@@ -1341,21 +1344,20 @@ struct derived_derived : base_struct_d, derived_struct
     int e;
 };
 
-static MetaType::StructInfo::MemberCollection get_base_struct_d_members(int16_t)
+static MetaType::StructInfo::MembersAndBases get_base_struct_d_members(int8_t)
 {
-    return { { MetaMember("d", &base_struct_d::d) }, { } };
+    return { { { MetaMember("d", &base_struct_d::d) }, { } }, { { } } };
 }
-static MetaType::StructInfo::MemberCollection get_derived_derived_members(int16_t)
-{
-    return { { MetaMember("e", &derived_derived::e) }, { } };
-}
-static MetaType::StructInfo::BaseClassCollection get_derived_derived_bases(int16_t)
+static MetaType::StructInfo::MembersAndBases get_derived_derived_info(int8_t)
 {
     return
     {
+        { { MetaMember("e", &derived_derived::e) }, { } },
         {
-            BaseClass::Create<base_struct_d, derived_derived>(),
-            BaseClass::Create<derived_struct, derived_derived>()
+            {
+                BaseClass::Create<base_struct_d, derived_derived>(),
+                BaseClass::Create<derived_struct, derived_derived>()
+            }
         }
     };
 }
@@ -1363,7 +1365,7 @@ static MetaType::StructInfo::BaseClassCollection get_derived_derived_bases(int16
 template<>
 const MetaType MetaType::MetaTypeConstructor<base_struct_d>::type = MetaType::RegisterStruct<base_struct_d>("base_struct_d", 0, &get_base_struct_d_members);
 template<>
-const MetaType MetaType::MetaTypeConstructor<derived_derived>::type = MetaType::RegisterStruct<derived_derived>("derived_derived", 0, &get_derived_derived_members, &get_derived_derived_bases);
+const MetaType MetaType::MetaTypeConstructor<derived_derived>::type = MetaType::RegisterStruct<derived_derived>("derived_derived", 0, &get_derived_derived_info);
 namespace
 {
 TEST(new_meta, derived_two_levels)
@@ -1414,22 +1416,21 @@ struct derived_derived_derived : derived_derived
     }
 };
 
-static MetaType::StructInfo::MemberCollection get_derived_derived_derived_members(int16_t)
-{
-    return { { }, { } };
-}
-static MetaType::StructInfo::BaseClassCollection get_derived_derived_derived_bases(int16_t)
+static MetaType::StructInfo::MembersAndBases get_derived_derived_derived_info(int8_t)
 {
     return
     {
+        { { }, { } },
         {
-            BaseClass::Create<derived_derived, derived_derived_derived>(),
+            {
+                BaseClass::Create<derived_derived, derived_derived_derived>(),
+            }
         }
     };
 }
 }
 template<>
-const MetaType MetaType::MetaTypeConstructor<derived_derived_derived>::type = MetaType::RegisterStruct<derived_derived_derived>("derived_derived_derived", 0, &get_derived_derived_derived_members, &get_derived_derived_derived_bases);
+const MetaType MetaType::MetaTypeConstructor<derived_derived_derived>::type = MetaType::RegisterStruct<derived_derived_derived>("derived_derived_derived", 0, &get_derived_derived_derived_info);
 namespace
 {
 TEST(new_meta, derived_three_levels)
@@ -1477,25 +1478,24 @@ struct pointer_to_struct_derived : pointer_to_struct_offsetting_base, pointer_to
 
     int b;
 };
-static MetaType::StructInfo::MemberCollection get_pointer_to_struct_base_members(int16_t)
+static MetaType::StructInfo::MembersAndBases get_pointer_to_struct_base_members(int8_t)
 {
-    return { { MetaMember("a", &pointer_to_struct_base::a) }, { } };
+    return { { { MetaMember("a", &pointer_to_struct_base::a) }, { } }, { { } } };
 }
-static MetaType::StructInfo::MemberCollection get_pointer_to_struct_offsetting_base_members(int16_t)
+static MetaType::StructInfo::MembersAndBases get_pointer_to_struct_offsetting_base_members(int8_t)
 {
-    return { { MetaMember("c", &pointer_to_struct_offsetting_base::c) }, { } };
+    return { { { MetaMember("c", &pointer_to_struct_offsetting_base::c) }, { } }, { { } } };
 }
-static MetaType::StructInfo::MemberCollection get_pointer_to_struct_derived_members(int16_t)
-{
-    return { { MetaMember("b", &pointer_to_struct_derived::b) }, { } };
-}
-static MetaType::StructInfo::BaseClassCollection get_pointer_to_struct_derived_bases(int16_t)
+static MetaType::StructInfo::MembersAndBases get_pointer_to_struct_derived_members(int8_t)
 {
     return
     {
+        { { MetaMember("b", &pointer_to_struct_derived::b) }, { } },
         {
-            BaseClass::Create<pointer_to_struct_offsetting_base, pointer_to_struct_derived>(),
-            BaseClass::Create<pointer_to_struct_base, pointer_to_struct_derived>()
+            {
+                BaseClass::Create<pointer_to_struct_offsetting_base, pointer_to_struct_derived>(),
+                BaseClass::Create<pointer_to_struct_base, pointer_to_struct_derived>()
+            }
         }
     };
 }
@@ -1505,7 +1505,7 @@ const MetaType MetaType::MetaTypeConstructor<pointer_to_struct_base>::type = Met
 template<>
 const MetaType MetaType::MetaTypeConstructor<pointer_to_struct_offsetting_base>::type = MetaType::RegisterStruct<pointer_to_struct_offsetting_base>("pointer_to_struct_offsetting_base", 0, &get_pointer_to_struct_offsetting_base_members);
 template<>
-const MetaType MetaType::MetaTypeConstructor<pointer_to_struct_derived>::type = MetaType::RegisterStruct<pointer_to_struct_derived>("pointer_to_struct_derived", 0, &get_pointer_to_struct_derived_members, &get_pointer_to_struct_derived_bases);
+const MetaType MetaType::MetaTypeConstructor<pointer_to_struct_derived>::type = MetaType::RegisterStruct<pointer_to_struct_derived>("pointer_to_struct_derived", 0, &get_pointer_to_struct_derived_members);
 namespace
 {
 TEST(new_meta, pointer_to_struct)
@@ -1555,8 +1555,7 @@ const MetaType MetaType::MetaTypeConstructor<ATypeErasure>::type = MetaType::Reg
 }
 namespace
 {
-// TODO: this has to work
-/*TEST(new_meta, type_erasure)
+TEST(new_meta, type_erasure)
 {
     MetaType::TypeErasureInfo::SupportedType<ATypeErasure, base_struct_a> support;
     ATypeErasure a((base_struct_a(5)));
@@ -1572,7 +1571,7 @@ namespace
     const MetaType::StructInfo * new_inner_info = new_inner.GetType().GetStructInfo();
     ASSERT_TRUE(new_inner_info);
     ASSERT_EQ(0, new_inner.Get<base_struct_a>().a);
-}*/
+}
 }
 
 #endif

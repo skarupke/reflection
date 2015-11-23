@@ -4,15 +4,16 @@
 #include <memory>
 #include <functional>
 
+template<typename HashType = size_t, typename HashFunction = std::hash<std::string>>
 struct HashedString
 {
     HashedString(const char * str)
-        : str(ptr::make_shared<const std::string>(str)), hash(std::hash<std::string>()(*this->str))
+        : str(ptr::make_shared<const std::string>(str)), hash(HashFunction()(*this->str))
     {
     }
 
     HashedString(std::string str)
-        : str(ptr::make_shared<const std::string>(std::move(str))), hash(std::hash<std::string>()(*this->str))
+        : str(ptr::make_shared<const std::string>(std::move(str))), hash(HashFunction()(*this->str))
     {
     }
 
@@ -97,73 +98,85 @@ struct HashedString
     {
         return str->c_str();
     }
-    uint32_t get_hash() const noexcept
+    HashType get_hash() const noexcept
     {
         return hash;
     }
 
 private:
     ptr::small_shared_ptr<const std::string> str;
-    uint32_t hash;
+    HashType hash;
 };
 
 namespace std
 {
-template<>
-struct hash<HashedString>
+template<typename H, typename F>
+struct hash<HashedString<H, F>>
 {
-    size_t operator()(const HashedString & object) const noexcept
+    size_t operator()(const HashedString<H, F> & object) const noexcept
     {
         return object.get_hash();
     }
 };
 }
 
-inline bool operator==(const std::string & lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator==(const std::string & lhs, const HashedString<H, F> & rhs) noexcept
 {
     return rhs == lhs;
 }
-inline bool operator==(const char * lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator==(const char * lhs, const HashedString<H, F> & rhs) noexcept
 {
     return rhs == lhs;
 }
-inline bool operator!=(const std::string & lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator!=(const std::string & lhs, const HashedString<H, F> & rhs) noexcept
 {
     return !(lhs == rhs);
 }
-inline bool operator!=(const char * lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator!=(const char * lhs, const HashedString<H, F> & rhs) noexcept
 {
     return !(lhs == rhs);
 }
-inline bool operator<(const std::string & lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator<(const std::string & lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs < rhs.get();
 }
-inline bool operator<(const char * lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator<(const char * lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs < rhs.get();
 }
-inline bool operator>(const std::string & lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator>(const std::string & lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs > rhs.get();
 }
-inline bool operator>(const char * lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator>(const char * lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs > rhs.get();
 }
-inline bool operator<=(const std::string & lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator<=(const std::string & lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs <= rhs.get();
 }
-inline bool operator<=(const char * lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator<=(const char * lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs <= rhs.get();
 }
-inline bool operator>=(const std::string & lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator>=(const std::string & lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs >= rhs.get();
 }
-inline bool operator>=(const char * lhs, const HashedString & rhs) noexcept
+template<typename H, typename F>
+inline bool operator>=(const char * lhs, const HashedString<H, F> & rhs) noexcept
 {
     return lhs >= rhs.get();
 }

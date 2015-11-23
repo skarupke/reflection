@@ -1,0 +1,24 @@
+namespace test_flatbuffers;
+
+struct Vec4
+{
+  x : float = 0;
+  y : float = 0;
+  z : float = 0;
+  w : float = 0;
+}
+
+table Monster
+{
+  vec : Vec4;
+  i : int = 0;
+  f : float = 0;
+}
+
+table Array
+{
+  array : [Monster];
+}
+
+root_type Array;
+

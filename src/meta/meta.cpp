@@ -23,14 +23,14 @@ bool throw_not_less_than_comparable()
 {
     RAW_THROW(std::runtime_error("you tried to compare two objects that are not less-than comparable"));
 }
-void assert_range_size_and_alignment(Range<unsigned char> memory, size_t size, size_t alignment)
+void assert_range_size_and_alignment(ArrayView<unsigned char> memory, size_t size, size_t alignment)
 {
     static_cast<void>(memory); static_cast<void>(size); static_cast<void>(alignment);
     RAW_ASSERT(memory.size() == size && (reinterpret_cast<uintptr_t>(memory.begin()) % alignment) == 0);
 }
 }
 
-MetaReference::MetaReference(const MetaType & type, Range<unsigned char> memory)
+MetaReference::MetaReference(const MetaType & type, ArrayView<unsigned char> memory)
 	: type(&type), memory(memory)
 {
     RAW_ASSERT(memory.size() == type.GetSize());
@@ -85,8 +85,8 @@ bool MetaReference::operator>=(const MetaReference & other) const
 {
 	return !(*this < other);
 }
-ConstMetaReference::ConstMetaReference(const MetaType & type, Range<const unsigned char> memory)
-	: reference(type, Range<unsigned char>(const_cast<unsigned char *>(memory.begin()), const_cast<unsigned char *>(memory.end())))
+ConstMetaReference::ConstMetaReference(const MetaType & type, ArrayView<const unsigned char> memory)
+    : reference(type, ArrayView<unsigned char>(const_cast<unsigned char *>(memory.begin()), const_cast<unsigned char *>(memory.end())))
 {
 }
 bool ConstMetaReference::operator==(const MetaReference & other) const
@@ -142,7 +142,7 @@ void swap(MetaProxy & lhs, MetaProxy & rhs)
 {
     RAW_ASSERT(&lhs.GetType() == &rhs.GetType());
 	unsigned char * memory = static_cast<unsigned char *>(alloca(rhs.GetType().GetSize()));
-	MetaOwningMemory temp(Range<unsigned char>(memory, memory + rhs.GetType().GetSize()), std::move(rhs));
+    MetaOwningMemory temp(ArrayView<unsigned char>(memory, memory + rhs.GetType().GetSize()), std::move(rhs));
     rhs.assign(std::move(lhs));
     lhs.assign(std::move(temp.GetVariant()));
 }
@@ -159,7 +159,7 @@ MetaType::MetaType(StringInfo string_info, GeneralInformation general, AccessTyp
 	: category(String), access_type(access_type), string_info(std::move(string_info)), general(std::move(general))
 {
 }
-MetaType::MetaType(GeneralInformation general, std::map<int32_t, HashedString> enum_values)
+MetaType::MetaType(GeneralInformation general, std::map<int32_t, ReflectionHashedString> enum_values)
     : category(Enum), access_type(PASS_BY_VALUE), enum_info(std::move(enum_values)), general(std::move(general))
 {
 }
@@ -184,7 +184,7 @@ namespace
 {
 struct GlobalStructStorage
 {
-	const MetaType & GetByName(const HashedString & name) const
+    const MetaType & GetByName(const ReflectionHashedString & name) const
 	{
 		std::lock_guard<std::mutex> lock(mutex);
 		auto found = by_name.find(name);
@@ -198,7 +198,7 @@ struct GlobalStructStorage
         if (found == by_type.end()) RAW_THROW(std::runtime_error("tried to get a type that wasn't registered"));
 		else return *found->second;
 	}
-	const HashedString & GetStoredName(Range<const char> name) const
+    const ReflectionHashedString & GetStoredName(StringView<const char> name) const
 	{
 		std::lock_guard<std::mutex> lock(mutex);
 		auto found = stored_names.find(name);
@@ -216,7 +216,7 @@ struct GlobalStructStorage
 	{
         RAW_ASSERT(to_add.category == MetaType::Struct);
 		std::lock_guard<std::mutex> lock(mutex);
-		const HashedString & name = to_add.GetStructInfo()->GetName();
+        const ReflectionHashedString & name = to_add.GetStructInfo()->GetName();
         RAW_VERIFY(by_name.emplace(name, &to_add).second); // this will trigger if you register two structs with the same name
         RAW_VERIFY(by_type.emplace(to_add.GetTypeInfo(), &to_add).second); // this will trigger if you register a struct under two different names
         RAW_VERIFY(stored_names.emplace(name.get(), name).second);
@@ -225,9 +225,9 @@ struct GlobalStructStorage
 
 private:
 	mutable std::mutex mutex;
-	std::map<HashedString, const MetaType *> by_name;
+    std::map<ReflectionHashedString, const MetaType *> by_name;
     std::map<std::type_index, const MetaType *> by_type;
-	std::unordered_map<Range<const char>, HashedString> stored_names;
+    std::unordered_map<StringView<const char>, ReflectionHashedString> stored_names;
 	std::unordered_map<uint32_t, const MetaType *> by_hash;
 };
 GlobalStructStorage & GetGlobalStructStorage()
@@ -352,12 +352,12 @@ MetaType::~MetaType()
 		break;
 	}
 }
-MetaType::StringInfo::StringInfo(Range<const char> (*get_as_range)(const MetaReference &), void (*set_from_range)(MetaReference &, Range<const char>))
+MetaType::StringInfo::StringInfo(StringView<const char> (*get_as_range)(const MetaReference &), void (*set_from_range)(MetaReference &, StringView<const char>))
 	: get_as_range(get_as_range), set_from_range(set_from_range)
 {
 }
 
-MetaType::EnumInfo::EnumInfo(std::map<int32_t, HashedString> values)
+MetaType::EnumInfo::EnumInfo(std::map<int32_t, ReflectionHashedString> values)
 	: values(std::move(values))
 {
 	for (const auto & pair : this->values)
@@ -370,7 +370,7 @@ MetaType::ArrayInfo::ArrayInfo(const MetaType & value_type, size_t array_size, M
 	: begin(begin), value_type(value_type), array_size(array_size)
 {
 }
-MetaType::StructInfo::StructInfo(HashedString name, int16_t current_version, GetMembersFunction get_members, GetBaseClassesFunction get_bases)
+MetaType::StructInfo::StructInfo(ReflectionHashedString name, int16_t current_version, GetMembersFunction get_members, GetBaseClassesFunction get_bases)
 	: name(std::move(name)), current_version(current_version), get_members(get_members), get_bases(get_bases)
 {
 }
@@ -451,7 +451,7 @@ std::map<std::pair<const MetaType *, const MetaType *>, MetaType::TypeErasureInf
 	return supported_types;
 }
 
-const MetaType & MetaType::GetStructType(const HashedString & name)
+const MetaType & MetaType::GetStructType(const ReflectionHashedString & name)
 {
 	return global_struct_storage.GetByName(name);
 }
@@ -459,7 +459,7 @@ const MetaType & MetaType::GetStructType(const std::type_info & type)
 {
 	return global_struct_storage.GetByType(type);
 }
-const HashedString & MetaType::GetRegisteredStructName(Range<const char> name)
+const ReflectionHashedString & MetaType::GetRegisteredStructName(StringView<const char> name)
 {
 	return global_struct_storage.GetStoredName(name);
 }
@@ -473,7 +473,7 @@ int32_t MetaType::EnumInfo::GetAsInt(const MetaReference & reference) const
     RAW_ASSERT(reference.GetType().GetEnumInfo() == this);
 	return *reinterpret_cast<const int32_t *>(reference.GetMemory().begin());
 }
-const HashedString & MetaType::EnumInfo::GetAsHashedString(const MetaReference & reference) const
+const ReflectionHashedString & MetaType::EnumInfo::GetAsHashedString(const MetaReference & reference) const
 {
     RAW_ASSERT(reference.GetType().GetEnumInfo() == this);
 	auto found = values.find(GetAsInt(reference));
@@ -661,17 +661,17 @@ CreateSimpleType(float, Float);
 CreateSimpleType(double, Double);
 #undef CreateSimpleType
 template<>
-const MetaType MetaType::MetaTypeConstructor<Range<const char> >::type = MetaType::RegisterString<Range<const char> >();
+const MetaType MetaType::MetaTypeConstructor<StringView<const char> >::type = MetaType::RegisterString<StringView<const char> >();
 template<>
 const MetaType MetaType::MetaTypeConstructor<std::string>::type = MetaType::RegisterString<std::string>();
 template<>
 struct MetaType::StringInfo::Specialization<std::string>
 {
-	static Range<const char> GetAsRange(const MetaReference & ref)
+    static StringView<const char> GetAsRange(const MetaReference & ref)
 	{
 		return ref.Get<std::string>();
 	}
-	static void SetFromRange(MetaReference & ref, Range<const char> range)
+    static void SetFromRange(MetaReference & ref, StringView<const char> range)
 	{
 		ref.Get<std::string>().assign(range.begin(), range.end());
 	}
@@ -771,7 +771,7 @@ MetaOwningVariant::MetaOwningVariant(const MetaReference & other)
 {
 	default_initialize([&](unsigned char * memory)
 	{
-		type->CopyConstruct(Range<unsigned char>(memory, memory + type->GetSize()), other.GetMemory());
+        type->CopyConstruct(ArrayView<unsigned char>(memory, memory + type->GetSize()), other.GetMemory());
 	});
 }
 MetaOwningVariant::MetaOwningVariant(MetaReference && other)
@@ -779,7 +779,7 @@ MetaOwningVariant::MetaOwningVariant(MetaReference && other)
 {
 	default_initialize([&](unsigned char * memory)
 	{
-		type->MoveConstruct(Range<unsigned char>(memory, memory + type->GetSize()), other.GetMemory());
+        type->MoveConstruct(ArrayView<unsigned char>(memory, memory + type->GetSize()), other.GetMemory());
 	});
 }
 MetaOwningVariant::MetaOwningVariant(const MetaOwningVariant & other)
@@ -798,7 +798,7 @@ MetaOwningVariant & MetaOwningVariant::operator=(MetaOwningVariant other)
 		{
 			if (type == other.type)
 			{
-				type->Assign(Range<unsigned char>(storage, storage + type->GetSize()), Range<unsigned char>(other.storage, other.storage + type->GetSize()));
+                type->Assign(ArrayView<unsigned char>(storage, storage + type->GetSize()), ArrayView<unsigned char>(other.storage, other.storage + type->GetSize()));
 			}
 			else
 			{
@@ -955,7 +955,7 @@ MetaConditionalMember::Condition::Condition(ConditionFunction condition)
 }
 
 
-ClassHeader::ClassHeader(HashedString class_name, int16_t version)
+ClassHeader::ClassHeader(ReflectionHashedString class_name, int16_t version)
 	: class_name(std::move(class_name)), version(version)
 {
 }
@@ -991,7 +991,7 @@ ClassHeaderList::iterator ClassHeaderList::find(const ClassHeader & header)
 {
 	return std::find(begin(), end(), header);
 }
-ClassHeaderList::iterator ClassHeaderList::find(const HashedString & class_name)
+ClassHeaderList::iterator ClassHeaderList::find(const ReflectionHashedString & class_name)
 {
     return std::find_if(begin(), end(), [&](const ClassHeader & header)
 	{
@@ -1003,7 +1003,7 @@ ClassHeaderList::const_iterator ClassHeaderList::find(const ClassHeader & header
 {
     return const_cast<ClassHeaderList &>(*this).find(header);
 }
-ClassHeaderList::const_iterator ClassHeaderList::find(const HashedString & class_name) const
+ClassHeaderList::const_iterator ClassHeaderList::find(const ReflectionHashedString & class_name) const
 {
     return const_cast<ClassHeaderList &>(*this).find(class_name);
 }

@@ -59,7 +59,7 @@ TYPED_TEST_P(SerializationTest, string)
 {
 	parse_test<TypeParam>(std::string("Hello,\nWorld!"));
 	parse_test<TypeParam>(std::string("π𝄞 "));
-	parse_test<TypeParam>(Range<const char>("range test"));
+    parse_test<TypeParam>(StringView<const char>("range test"));
 	parse_test<TypeParam>('\'');
 	parse_test<TypeParam>('\n');
 	parse_test<TypeParam>('c');

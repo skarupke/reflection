@@ -30,7 +30,7 @@ struct BinaryWriter
         };
     }
 
-    void simple_to_binary(Range<const unsigned char> data, std::ostream & out)
+    void simple_to_binary(ArrayView<const unsigned char> data, std::ostream & out)
     {
         out.write(reinterpret_cast<const char *>(data.begin()), data.size());
     }
@@ -40,7 +40,7 @@ struct BinaryWriter
         out.write(reinterpret_cast<const char *>(&simple), sizeof(T));
     }
 
-    void string_to_binary(Range<const char> str, std::ostream & out)
+    void string_to_binary(StringView<const char> str, std::ostream & out)
     {
         simple_to_binary(uint32_t(str.size()), out);
         out.write(str.begin(), str.size());
@@ -218,26 +218,26 @@ In copy_to(In in, Out out_begin, Out out_end)
 struct BinaryReader
 {
     template<typename T>
-    static void simple_from_binary(T & object, Range<const unsigned char> & in)
+    static void simple_from_binary(T & object, ArrayView<const unsigned char> & in)
     {
         auto begin = reinterpret_cast<unsigned char *>(std::addressof(object));
         auto end = begin + sizeof(T);
         in = { copy_to(in.begin(), begin, end), in.end() };
     }
-    static void simple_from_binary(Range<unsigned char> object, Range<const unsigned char> & in)
+    static void simple_from_binary(ArrayView<unsigned char> object, ArrayView<const unsigned char> & in)
     {
         in = { copy_to(in.begin(), object.begin(), object.end()), in.end() };
     }
 
-    void string_from_binary(std::string & str, Range<const unsigned char> & in)
+    void string_from_binary(std::string & str, ArrayView<const unsigned char> & in)
     {
         uint32_t size = 0;
         simple_from_binary(size, in);
         str.resize(size);
         std::copy_n(in.begin(), size, str.begin());
-        in = in.subrange(size);
+        in = in.subview(size);
     }
-    void string_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void string_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         const MetaType::StringInfo * info = object.GetType().GetStringInfo();
         if (!info) RAW_THROW(std::runtime_error("invalid argument to string_from_binary"));
@@ -246,7 +246,7 @@ struct BinaryReader
         info->SetFromRange(object, buffer);
     }
 
-    void list_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void list_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         const MetaType::ListInfo * info = object.GetType().GetListInfo();
         if (!info) RAW_THROW(std::runtime_error("wrong argument for list_from_binary"));
@@ -262,7 +262,7 @@ struct BinaryReader
         }
     }
 
-    void array_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void array_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         const MetaType::ArrayInfo * info = object.GetType().GetArrayInfo();
         if (!info) RAW_THROW(std::runtime_error("wrong argument for array_from_binary"));
@@ -274,7 +274,7 @@ struct BinaryReader
         }
     }
 
-    void set_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void set_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         const MetaType::SetInfo * info = object.GetType().GetSetInfo();
         if (!info) RAW_THROW(std::runtime_error("wrong argument for set_from_binary"));
@@ -290,7 +290,7 @@ struct BinaryReader
         }
     }
 
-    void map_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void map_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         const MetaType::MapInfo * info = object.GetType().GetMapInfo();
         if (!info) RAW_THROW(std::runtime_error("wrong argument for map_from_binary"));
@@ -311,13 +311,13 @@ struct BinaryReader
 
     ReusableStorage<ClassHeaderList> header_storage;
 
-    ReusableStorage<ClassHeaderList>::Reusable struct_headers_from_binary(Range<const unsigned char> & in, const MetaType * struct_type)
+    ReusableStorage<ClassHeaderList>::Reusable struct_headers_from_binary(ArrayView<const unsigned char> & in, const MetaType * struct_type)
     {
         struct ClassHeaderListBuilder
         {
             void operator()(ClassHeaderList & to_build, const MetaType & struct_type) const
             {
-                int16_t version = 0;
+                int8_t version = 0;
                 simple_from_binary(version, in);
                 const MetaType::StructInfo * info = struct_type.GetStructInfo();
                 if (!info) RAW_THROW(std::runtime_error("invalid struct type"));
@@ -328,7 +328,7 @@ struct BinaryReader
                 }
             }
 
-            Range<const unsigned char> & in;
+            ArrayView<const unsigned char> & in;
         };
 
         ReusableStorage<ClassHeaderList>::Reusable result = header_storage.GetObject();
@@ -347,18 +347,18 @@ struct BinaryReader
     }
 
     template<typename T>
-    void member_from_binary(const T & member, MetaReference object, Range<const unsigned char> & in)
+    void member_from_binary(const T & member, MetaReference object, ArrayView<const unsigned char> & in)
     {
         from_binary(member.GetReference(object), in);
     }
 
     template<typename T>
-    void conditional_member_from_binary(const T & member, MetaReference object, Range<const unsigned char> & in)
+    void conditional_member_from_binary(const T & member, MetaReference object, ArrayView<const unsigned char> & in)
     {
         if (member.ObjectHasMember(object)) member_from_binary(member.GetMember(), object, in);
     }
 
-    void struct_members_from_binary(MetaReference object, const ClassHeaderList & headers, Range<const unsigned char> & in)
+    void struct_members_from_binary(MetaReference object, const ClassHeaderList & headers, ArrayView<const unsigned char> & in)
     {
         const MetaType::StructInfo * info = object.GetType().GetStructInfo();
         if (!info) RAW_THROW(std::runtime_error("wrong argument for struct_from_binary"));
@@ -369,12 +369,12 @@ struct BinaryReader
         for (const auto & conditional_member : all_members.direct_members.conditional_members) conditional_member_from_binary(conditional_member, object, in);
     }
 
-    void struct_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void struct_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         struct_members_from_binary(object, struct_headers_from_binary(in, &object.GetType()).object, in);
     }
 
-    void pointer_to_struct_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void pointer_to_struct_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         const MetaType::PointerToStructInfo * info = object.GetType().GetPointerToStructInfo();
         if (!info) RAW_THROW(std::runtime_error("invalid argument to pointer_to_struct_from_binary"));
@@ -389,7 +389,7 @@ struct BinaryReader
         return struct_members_from_binary(new_reference, headers.object, in);
     }
 
-    void type_erasure_from_binary(MetaReference object, Range<const unsigned char> & in)
+    void type_erasure_from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         const MetaType::TypeErasureInfo * info = object.GetType().GetTypeErasureInfo();
         if (!info) RAW_THROW(std::runtime_error("invalid argument to type_erasure_from_binary"));
@@ -404,7 +404,7 @@ struct BinaryReader
         return struct_members_from_binary(new_reference, headers.object, in);
     }
 
-    void from_binary(MetaReference object, Range<const unsigned char> & in)
+    void from_binary(MetaReference object, ArrayView<const unsigned char> & in)
     {
         switch(object.GetType().category)
         {
@@ -443,7 +443,7 @@ struct BinaryReader
     }
 };
 
-void read_optimistic_binary(metav3::MetaReference object, Range<const unsigned char> in)
+void read_optimistic_binary(metav3::MetaReference object, ArrayView<const unsigned char> in)
 {
     BinaryReader().from_binary(object, in);
 }
@@ -456,7 +456,7 @@ std::string OptimisticBinarySerializer::serialize(metav3::ConstMetaReference obj
 }
 bool OptimisticBinarySerializer::deserialize(metav3::MetaReference object, const std::string & str) const
 {
-    Range<const unsigned char> in(reinterpret_cast<const unsigned char *>(str.data()), reinterpret_cast<const unsigned char *>(str.data() + str.size()));
+    ArrayView<const unsigned char> in(reinterpret_cast<const unsigned char *>(str.data()), reinterpret_cast<const unsigned char *>(str.data() + str.size()));
     read_optimistic_binary(object, in);
     return true;
 }

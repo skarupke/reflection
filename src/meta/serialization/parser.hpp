@@ -1,12 +1,13 @@
 #pragma once
 
 #include <utility>
-#include "util/range.hpp"
+#include "util/view.hpp"
 #include <string>
 #include <vector>
 #include <algorithm>
 #include "util/algorithm.hpp"
 #include "util/reusable_storage.hpp"
+#include <functional>
 
 namespace monad
 {
@@ -194,20 +195,20 @@ inline SuccessOrFailure<ResultType, FailureType> fmap(const FunctionType & funct
 
 struct ParseState
 {
-	ParseState(Range<const char> text, ReusableStorage<std::string> & string_storage)
+    ParseState(StringView<const char> text, ReusableStorage<std::string> & string_storage)
 		: text(text), string_storage(string_storage)
 	{
 	}
-	ParseState(const ParseState & other, Range<const char> new_text)
+    ParseState(const ParseState & other, StringView<const char> new_text)
 		: text(new_text), string_storage(other.string_storage)
 	{
 	}
-	ParseState NewText(Range<const char> text) const
+    ParseState NewText(StringView<const char> text) const
 	{
 		return ParseState(*this, text);
 	}
 
-	Range<const char> text;
+    StringView<const char> text;
 	std::reference_wrapper<ReusableStorage<std::string>> string_storage;
 };
 
@@ -371,7 +372,7 @@ inline ParseResult<ResultType> fmap(ParseResult<T> object, const FunctionType & 
 	};
 }
 
-inline ParseResult<Range<const char> > skip_whitespace(ParseState state)
+inline ParseResult<StringView<const char> > skip_whitespace(ParseState state)
 {
 	auto end_whitespace = std::find_if(state.text.begin(), state.text.end(), [](char c)
 	{
@@ -386,27 +387,43 @@ inline ParseResult<Range<const char> > skip_whitespace(ParseState state)
 			return true;
 		}
 	});
-	return ParseSuccess<Range<const char> >({ state.text.begin(), end_whitespace }, state.NewText({ end_whitespace, state.text.end() }));
+    return ParseSuccess<StringView<const char> >({ state.text.begin(), end_whitespace }, state.NewText({ end_whitespace, state.text.end() }));
 }
 
-inline ParseResult<Range<const char> > parse_identifier(ParseState state)
+inline const char * find_end_of_identifier(StringView<const char> view)
 {
-	auto check_identifier_begin = [](char c)
-	{
-		if (c >= 'a' && c <= 'z') return true;
-		else return c >= 'A' && c <= 'Z';
-	};
-	auto check_identifier_remainder = [&](char c)
-	{
-		if (check_identifier_begin(c)) return true;
-		else if (c >= '0' && c <= '9') return true;
-		else return c == '_';
-	};
+    auto check_identifier_begin = [](char c)
+    {
+        return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+    };
+    auto check_identifier_remainder = [&](char c)
+    {
+        return check_identifier_begin(c) || (c >= '0' && c <= '9');
+    };
 
-	auto next_non_identifier = std::find_if(state.text.begin(), state.text.end(), [&](char c){ return !check_identifier_begin(c); });
-	if (next_non_identifier == state.text.begin()) return ParseErrorMessage("expected an identifier", state);
-	next_non_identifier = std::find_if(next_non_identifier, state.text.end(), [&](char c){ return !check_identifier_remainder(c); });
-	return ParseSuccess<Range<const char> >({ state.text.begin(), next_non_identifier }, state.NewText({ next_non_identifier, state.text.end() }));
+    if (view.empty() || !check_identifier_begin(view.front()))
+        return view.begin();
+
+    auto next = std::find_if(view.begin() + 1, view.end(), [&](char c){ return !check_identifier_remainder(c); });
+    // check if it's a C++ namespace, for example foo::Bar
+    if (next == view.end() || *next != ':')
+        return next;
+    auto next_next = next + 1;
+    if (next_next == view.end() || *next_next != ':')
+        return next;
+    auto next_next_next = next_next + 1;
+    if (next_next_next == view.end() || !check_identifier_begin(*next_next_next))
+        return next;
+    return find_end_of_identifier({ next_next_next, view.end() });
+}
+
+inline ParseResult<StringView<const char> > parse_identifier(ParseState state)
+{
+    auto end = find_end_of_identifier(state.text);
+    if (end == state.text.begin())
+        return ParseErrorMessage("expected an identifier", state);
+
+    return ParseSuccess<StringView<const char> >({ state.text.begin(), end }, state.NewText({ end, state.text.end() }));
 }
 
 inline ParseResult<void> parse_char(ParseState state, char c)
@@ -447,7 +464,7 @@ ParseResult<T> parse_unsigned(ParseState state)
 	auto end = std::find_if(state.text.begin(), state.text.end(), [](char c){ return !is_digit(c); });
 	if (state.text.begin() == end) return ParseErrorMessage("error while trying to parse an int. expected a digit", state);
 	T sum = 0;
-	for (char character : Range<const char>(state.text.begin(), end))
+    for (char character : StringView<const char>(state.text.begin(), end))
 	{
 		T sum_before = sum;
 		sum *= 10;

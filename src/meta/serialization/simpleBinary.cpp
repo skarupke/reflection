@@ -16,7 +16,7 @@ struct BinaryWriter
 		out.write(reinterpret_cast<const char *>(&simple), sizeof(T));
 	}
 
-	void string_to_binary(Range<const char> str, std::ostream & out)
+	void string_to_binary(StringView<const char> str, std::ostream & out)
 	{
 		simple_to_binary(uint32_t(str.size()), out);
 		out.write(str.begin(), str.size());
@@ -345,7 +345,7 @@ struct BinaryReader
         case GET_BY_REF_SET_BY_VALUE:
 		{
 			unsigned char * memory = static_cast<unsigned char *>(alloca(member.GetType().GetSize()));
-			MetaOwningMemory temp(Range<unsigned char>(memory, memory + member.GetType().GetSize()), member.GetType());
+			MetaOwningMemory temp(ArrayView<unsigned char>(memory, memory + member.GetType().GetSize()), member.GetType());
 			MetaReference as_reference = temp.GetVariant();
 			from_binary(as_reference, in);
             member.ValueRefSet(object, as_reference);

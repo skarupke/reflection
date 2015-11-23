@@ -44,19 +44,19 @@ struct MetaType::SetInfo::Creator<std::multiset<T, C, A>>
         return
         {
             GetMetaType<T>(),
-            [](const MetaReference & set) -> size_t
+            [](ConstMetaReference set) -> size_t
             {
                 return set.Get<Self>().size();
             },
-            [](MetaReference & object, MetaReference && value) -> std::pair<SetIterator, bool>
+            [](MetaReference object, MetaReference && value) -> std::pair<SetIterator, bool>
             {
                 return { object.Get<Self>().insert(std::move(value.Get<T>())), true };
             },
-            [](const MetaReference & object) -> SetIterator
+            [](ConstMetaReference object) -> SetIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).begin();
             },
-            [](const MetaReference & object) -> SetIterator
+            [](ConstMetaReference object) -> SetIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).end();
             }
@@ -109,19 +109,19 @@ struct MetaType::SetInfo::Creator<std::unordered_multiset<T, H, E, A>>
         return
         {
             GetMetaType<T>(),
-            [](const MetaReference & set) -> size_t
+            [](ConstMetaReference set) -> size_t
             {
                 return set.Get<Self>().size();
             },
-            [](MetaReference & object, MetaReference && value) -> std::pair<SetIterator, bool>
+            [](MetaReference object, MetaReference && value) -> std::pair<SetIterator, bool>
             {
                 return { object.Get<Self>().insert(std::move(value.Get<T>())), true };
             },
-            [](const MetaReference & object) -> SetIterator
+            [](ConstMetaReference object) -> SetIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).begin();
             },
-            [](const MetaReference & object) -> SetIterator
+            [](ConstMetaReference object) -> SetIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).end();
             }
@@ -154,19 +154,19 @@ struct MetaType::MapInfo::Creator<std::unordered_multimap<K, V, H, E, A>>
         {
             GetMetaType<K>(),
             GetMetaType<V>(),
-            [](const MetaReference & object) -> size_t
+            [](ConstMetaReference object) -> size_t
             {
                 return object.Get<Self>().size();
             },
-            [](MetaReference & object, MetaReference && key, MetaReference && value) -> std::pair<MapIterator, bool>
+            [](MetaReference object, MetaReference && key, MetaReference && value) -> std::pair<MapIterator, bool>
             {
                 return { object.Get<Self>().emplace(std::move(key.Get<K>()), std::move(value.Get<V>())), true };
             },
-            [](const MetaReference & object) -> MapIterator
+            [](ConstMetaReference object) -> MapIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).begin();
             },
-            [](const MetaReference & object) -> MapIterator
+            [](ConstMetaReference object) -> MapIterator
             {
                 return const_cast<Self &>(object.Get<Self>()).end();
             }

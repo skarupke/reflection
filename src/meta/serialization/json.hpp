@@ -2,10 +2,10 @@
 
 #include "meta/metafwd.hpp"
 #include <string>
-#include "util/range.hpp"
+#include "util/view.hpp"
 
 struct JsonSerializer
 {
 	std::string serialize(meta::ConstMetaReference object) const;
-	bool deserialize(meta::MetaReference to_fill, Range<const char> json_text) const;
+	bool deserialize(meta::MetaReference to_fill, StringView<const char> json_text) const;
 };

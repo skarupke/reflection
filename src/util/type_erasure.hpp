@@ -214,8 +214,8 @@ private:
     {
         Storage temp;
         templated_copy_construct<T>(temp, rhs);
-        Base::template templated_swap<T>(lhs, temp);
-        temp.template destroy<T>();
+        lhs.template destroy<T>();
+        Base::template templated_move_and_destroy<T>(lhs, std::move(temp));
     }
 };
 

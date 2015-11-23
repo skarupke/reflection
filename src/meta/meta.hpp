@@ -6,7 +6,7 @@
 #include "debug/assert.hpp"
 #include <map>
 #include "util/forwarding_constructor.hpp"
-#include "util/range.hpp"
+#include "util/view.hpp"
 #include "util/pointer.hpp"
 #include "util/shared_ptr.hpp"
 #include "util/type_erasure.hpp"
@@ -25,11 +25,20 @@ namespace meta
 template<typename T, typename D = std::default_delete<T> >
 using unique_ptr_type = dunique_ptr<T, D>;
 
+struct ReflectionStringHash
+{
+    uint32_t operator()(const std::string & str) const
+    {
+        return std::max(1u, uint32_t(std::hash<std::string>()(str)));
+    }
+};
+typedef HashedString<uint32_t, ReflectionStringHash> ReflectionHashedString;
+
 namespace detail
 {
 bool throw_not_equality_comparable();
 bool throw_not_less_than_comparable();
-void assert_range_size_and_alignment(Range<unsigned char> memory, size_t size, size_t alignment);
+void assert_range_size_and_alignment(ArrayView<unsigned char> memory, size_t size, size_t alignment);
 }
 
 struct MetaMember;
@@ -43,7 +52,7 @@ struct MetaReference
 {
     template<typename T>
     MetaReference(T & object);
-    MetaReference(const MetaType & type, Range<unsigned char> memory);
+    MetaReference(const MetaType & type, ArrayView<unsigned char> memory);
     MetaReference(const MetaReference &) = default;
     MetaReference(MetaReference &&) = default;
     MetaReference(MetaReference & other)
@@ -63,7 +72,7 @@ struct MetaReference
     {
         return *type;
     }
-    Range<unsigned char> GetMemory() const
+    ArrayView<unsigned char> GetMemory() const
     {
         return memory;
     }
@@ -82,7 +91,7 @@ struct MetaReference
 
 private:
     const MetaType * type;
-    Range<unsigned char> memory;
+    ArrayView<unsigned char> memory;
 };
 
 struct MetaProxy : MetaReference
@@ -131,7 +140,7 @@ struct ConstMetaReference
 {
     template<typename T>
     ConstMetaReference(const T & object);
-    ConstMetaReference(const MetaType & type, Range<const unsigned char> memory);
+    ConstMetaReference(const MetaType & type, ArrayView<const unsigned char> memory);
     ConstMetaReference(const ConstMetaReference &) = default;
     ConstMetaReference(ConstMetaReference &&) = default;
     ConstMetaReference & operator=(const ConstMetaReference &) = delete;
@@ -146,7 +155,7 @@ struct ConstMetaReference
     {
         return reference.GetType();
     }
-    Range<const unsigned char> GetMemory() const
+    ArrayView<const unsigned char> GetMemory() const
     {
         return reference.GetMemory();
     }
@@ -242,7 +251,7 @@ private:
 
 struct ClassHeader
 {
-    ClassHeader(HashedString, int16_t);
+    ClassHeader(ReflectionHashedString, int16_t);
 
     bool operator<(const ClassHeader & other) const;
     bool operator<=(const ClassHeader & other) const;
@@ -251,7 +260,7 @@ struct ClassHeader
     bool operator==(const ClassHeader & other) const;
     bool operator!=(const ClassHeader & other) const;
 
-    const HashedString & GetClassName() const
+    const ReflectionHashedString & GetClassName() const
     {
         return class_name;
     }
@@ -260,7 +269,7 @@ struct ClassHeader
         return version;
     }
 private:
-    HashedString class_name;
+    ReflectionHashedString class_name;
     int16_t version;
 };
 struct ClassHeaderList : std::vector<ClassHeader>
@@ -273,9 +282,9 @@ struct ClassHeaderList : std::vector<ClassHeader>
     }
 
     iterator find(const ClassHeader & header);
-    iterator find(const HashedString & class_name);
+    iterator find(const ReflectionHashedString & class_name);
     const_iterator find(const ClassHeader & header) const;
-    const_iterator find(const HashedString & class_name) const;
+    const_iterator find(const ReflectionHashedString & class_name) const;
 };
 
 struct BaseClass
@@ -341,7 +350,7 @@ struct MetaType
         Float,
         Double,
         Enum,
-        String, // Utf8 text in a Range<const char>
+        String, // Utf8 text in a StringView<const char>
         List, // dynamic size Array
         Array, // fixed size List
         Set,
@@ -369,35 +378,35 @@ struct MetaType
     {
         return general.allocate();
     }
-    void Construct(Range<unsigned char> memory) const
+    void Construct(ArrayView<unsigned char> memory) const
     {
         general.construct(memory);
     }
-    void CopyConstruct(Range<unsigned char> memory, Range<const unsigned char> other) const
+    void CopyConstruct(ArrayView<unsigned char> memory, ArrayView<const unsigned char> other) const
     {
         general.copy_construct(memory, other);
     }
-    void MoveConstruct(Range<unsigned char> memory, Range<unsigned char> && other) const
+    void MoveConstruct(ArrayView<unsigned char> memory, ArrayView<unsigned char> && other) const
     {
         general.move_construct(memory, std::move(other));
     }
-    void Assign(Range<unsigned char> lhs, Range<const unsigned char> rhs) const
+    void Assign(ArrayView<unsigned char> lhs, ArrayView<const unsigned char> rhs) const
     {
         general.copy_assign(lhs, rhs);
     }
-    void Assign(Range<unsigned char> lhs, Range<unsigned char> && rhs) const
+    void Assign(ArrayView<unsigned char> lhs, ArrayView<unsigned char> && rhs) const
     {
         general.move_assign(lhs, std::move(rhs));
     }
-    void Destroy(Range<unsigned char> memory) const
+    void Destroy(ArrayView<unsigned char> memory) const
     {
         general.destroy(memory);
     }
-    bool Equals(Range<const unsigned char> lhs, Range<const unsigned char> rhs) const
+    bool Equals(ArrayView<const unsigned char> lhs, ArrayView<const unsigned char> rhs) const
     {
         return general.equals(lhs, rhs);
     }
-    bool LessThan(Range<const unsigned char> lhs, Range<const unsigned char> rhs) const
+    bool LessThan(ArrayView<const unsigned char> lhs, ArrayView<const unsigned char> rhs) const
     {
         return general.less_than(lhs, rhs);
     }
@@ -437,7 +446,7 @@ struct MetaType
         template<typename T>
         struct PlacementConstruct<T, true>
         {
-            static void construct(Range<unsigned char> memory)
+            static void construct(ArrayView<unsigned char> memory)
             {
                 detail::assert_range_size_and_alignment(memory, sizeof(T), alignof(T));
                 new (memory.begin()) T();
@@ -446,7 +455,7 @@ struct MetaType
         template<typename T>
         struct PlacementConstruct<T, false>
         {
-            static void construct(Range<unsigned char>)
+            static void construct(ArrayView<unsigned char>)
             {
                 RAW_ASSERT(false, "the type is not default constructible");
             }
@@ -456,7 +465,7 @@ struct MetaType
         template<typename T>
         struct CopyConstruct<T, true>
         {
-            static void copy(Range<unsigned char> memory, Range<const unsigned char> other)
+            static void copy(ArrayView<unsigned char> memory, ArrayView<const unsigned char> other)
             {
                 detail::assert_range_size_and_alignment(memory, sizeof(T), alignof(T));
                 new (memory.begin()) T(*reinterpret_cast<const T *>(other.begin()));
@@ -465,7 +474,7 @@ struct MetaType
         template<typename T>
         struct CopyConstruct<T, false>
         {
-            static void copy(Range<unsigned char>, Range<const unsigned char>)
+            static void copy(ArrayView<unsigned char>, ArrayView<const unsigned char>)
             {
                 RAW_ASSERT(false, "the type is not copy constructible");
             }
@@ -475,7 +484,7 @@ struct MetaType
         template<typename T>
         struct MoveConstruct<T, true>
         {
-            static void move(Range<unsigned char> memory, Range<unsigned char> && other)
+            static void move(ArrayView<unsigned char> memory, ArrayView<unsigned char> && other)
             {
                 detail::assert_range_size_and_alignment(memory, sizeof(T), alignof(T));
                 new (memory.begin()) T(std::move(*reinterpret_cast<T *>(other.begin())));
@@ -484,7 +493,7 @@ struct MetaType
         template<typename T>
         struct MoveConstruct<T, false>
         {
-            static void move(Range<unsigned char>, Range<unsigned char> &&)
+            static void move(ArrayView<unsigned char>, ArrayView<unsigned char> &&)
             {
                 RAW_ASSERT(false, "the type is not copy or move constructible");
             }
@@ -494,7 +503,7 @@ struct MetaType
         template<typename T>
         struct CopyAssign<T, true>
         {
-            static void copy(Range<unsigned char> lhs, Range<const unsigned char> rhs)
+            static void copy(ArrayView<unsigned char> lhs, ArrayView<const unsigned char> rhs)
             {
                 *reinterpret_cast<T *>(lhs.begin()) = *reinterpret_cast<const T *>(rhs.begin());
             }
@@ -502,7 +511,7 @@ struct MetaType
         template<typename T>
         struct CopyAssign<T, false>
         {
-            static void copy(Range<unsigned char>, Range<const unsigned char>)
+            static void copy(ArrayView<unsigned char>, ArrayView<const unsigned char>)
             {
                 RAW_ASSERT(false, "the type is not copy assignable");
             }
@@ -512,7 +521,7 @@ struct MetaType
         template<typename T>
         struct MoveAssign<T, true>
         {
-            static void move(Range<unsigned char> lhs, Range<unsigned char> && rhs)
+            static void move(ArrayView<unsigned char> lhs, ArrayView<unsigned char> && rhs)
             {
                 *reinterpret_cast<T *>(lhs.begin()) = std::move(*reinterpret_cast<T *>(rhs.begin()));
             }
@@ -520,7 +529,7 @@ struct MetaType
         template<typename T>
         struct MoveAssign<T, false>
         {
-            static void move(Range<unsigned char>, Range<unsigned char> &&)
+            static void move(ArrayView<unsigned char>, ArrayView<unsigned char> &&)
             {
                 RAW_ASSERT(false, "the type is not copy or move assignable");
             }
@@ -528,7 +537,7 @@ struct MetaType
         template<typename T>
         struct Destroy
         {
-            static void destroy(Range<unsigned char> object)
+            static void destroy(ArrayView<unsigned char> object)
             {
                 reinterpret_cast<T *>(object.begin())->~T();
             }
@@ -538,7 +547,7 @@ struct MetaType
         template<typename T, size_t Size>
         struct Destroy<T[Size]>
         {
-            static void destroy(Range<unsigned char> object)
+            static void destroy(ArrayView<unsigned char> object)
             {
                 for (size_t i = 0; i < Size; ++i)
                     (*reinterpret_cast<T (*)[Size]>(object.begin()))[i].~T();
@@ -549,7 +558,7 @@ struct MetaType
         template<typename T>
         struct EqualityComparer<T, true>
         {
-            static bool Equals(Range<const unsigned char> lhs, Range<const unsigned char> rhs)
+            static bool Equals(ArrayView<const unsigned char> lhs, ArrayView<const unsigned char> rhs)
             {
                 return *reinterpret_cast<const T *>(lhs.begin()) == *reinterpret_cast<const T *>(rhs.begin());
             }
@@ -557,7 +566,7 @@ struct MetaType
         template<typename T>
         struct EqualityComparer<T, false>
         {
-            static bool Equals(Range<const unsigned char>, Range<const unsigned char>)
+            static bool Equals(ArrayView<const unsigned char>, ArrayView<const unsigned char>)
             {
                 return detail::throw_not_equality_comparable();
             }
@@ -567,7 +576,7 @@ struct MetaType
         template<typename T>
         struct LessThanComparer<T, true>
         {
-            static bool LessThan(Range<const unsigned char> lhs, Range<const unsigned char> rhs)
+            static bool LessThan(ArrayView<const unsigned char> lhs, ArrayView<const unsigned char> rhs)
             {
                 return *reinterpret_cast<const T *>(lhs.begin()) < *reinterpret_cast<const T *>(rhs.begin());
             }
@@ -575,7 +584,7 @@ struct MetaType
         template<typename T>
         struct LessThanComparer<T, false>
         {
-            static bool LessThan(Range<const unsigned char>, Range<const unsigned char>)
+            static bool LessThan(ArrayView<const unsigned char>, ArrayView<const unsigned char>)
             {
                 return detail::throw_not_less_than_comparable();
             }
@@ -585,14 +594,14 @@ struct MetaType
         size_t size;
         uint32_t alignment;
         allocate_pointer (*allocate)();
-        void (*construct)(Range<unsigned char>);
-        void (*copy_construct)(Range<unsigned char>, Range<const unsigned char>);
-        void (*move_construct)(Range<unsigned char>, Range<unsigned char> &&);
-        void (*copy_assign)(Range<unsigned char>, Range<const unsigned char>);
-        void (*move_assign)(Range<unsigned char>, Range<unsigned char> &&);
-        void (*destroy)(Range<unsigned char>);
-        bool (*equals)(Range<const unsigned char> lhs, Range<const unsigned char> rhs);
-        bool (*less_than)(Range<const unsigned char> lhs, Range<const unsigned char> rhs);
+        void (*construct)(ArrayView<unsigned char>);
+        void (*copy_construct)(ArrayView<unsigned char>, ArrayView<const unsigned char>);
+        void (*move_construct)(ArrayView<unsigned char>, ArrayView<unsigned char> &&);
+        void (*copy_assign)(ArrayView<unsigned char>, ArrayView<const unsigned char>);
+        void (*move_assign)(ArrayView<unsigned char>, ArrayView<unsigned char> &&);
+        void (*destroy)(ArrayView<unsigned char>);
+        bool (*equals)(ArrayView<const unsigned char> lhs, ArrayView<const unsigned char> rhs);
+        bool (*less_than)(ArrayView<const unsigned char> lhs, ArrayView<const unsigned char> rhs);
     };
     const AllTypesThatExist category;
     const AccessType access_type;
@@ -604,8 +613,8 @@ struct MetaType
     };
 
     static const MetaType & GetStructType(const std::type_info &);
-    static const MetaType & GetStructType(const HashedString &);
-    static const HashedString & GetRegisteredStructName(Range<const char> name);
+    static const MetaType & GetStructType(const ReflectionHashedString &);
+    static const ReflectionHashedString & GetRegisteredStructName(StringView<const char> name);
     static const MetaType & GetRegisteredStruct(uint32_t hash);
 
     struct SimpleInfo
@@ -619,28 +628,28 @@ struct MetaType
             return StringInfo(&Specialization<T>::GetAsRange, &Specialization<T>::SetFromRange);
         }
 
-        Range<const char> GetAsRange(const MetaReference & ref) const
+        StringView<const char> GetAsRange(const MetaReference & ref) const
         {
             return get_as_range(ref);
         }
-        void SetFromRange(MetaReference & ref, Range<const char> range) const
+        void SetFromRange(MetaReference & ref, StringView<const char> range) const
         {
             return set_from_range(ref, range);
         }
 
     private:
-        Range<const char> (*get_as_range)(const MetaReference &);
-        void (*set_from_range)(MetaReference &, Range<const char>);
-        StringInfo(Range<const char> (*get_as_range)(const MetaReference &), void (*set_from_range)(MetaReference &, Range<const char>));
+        StringView<const char> (*get_as_range)(const MetaReference &);
+        void (*set_from_range)(MetaReference &, StringView<const char>);
+        StringInfo(StringView<const char> (*get_as_range)(const MetaReference &), void (*set_from_range)(MetaReference &, StringView<const char>));
 
         template<typename T, typename = void>
         struct Specialization
         {
-            static Range<const char> GetAsRange(const MetaReference & ref)
+            static StringView<const char> GetAsRange(const MetaReference & ref)
             {
                 return ref.Get<T>();
             }
-            static void SetFromRange(MetaReference & ref, Range<const char> range)
+            static void SetFromRange(MetaReference & ref, StringView<const char> range)
             {
                 ref.Get<T>() = range;
             }
@@ -648,13 +657,13 @@ struct MetaType
     };
     struct EnumInfo
     {
-        EnumInfo(std::map<int32_t, HashedString> values);
+        EnumInfo(std::map<int32_t, ReflectionHashedString> values);
 
         int32_t GetAsInt(const MetaReference &) const;
-        const HashedString & GetAsHashedString(const MetaReference &) const;
+        const ReflectionHashedString & GetAsHashedString(const MetaReference &) const;
         void SetFromString(MetaReference & to_set, const std::string & value) const;
 
-        std::map<int32_t, HashedString> values;
+        std::map<int32_t, ReflectionHashedString> values;
 
     private:
         std::map<std::string, int32_t> int_values;
@@ -940,9 +949,9 @@ struct MetaType
 
         typedef StructInfo::MemberCollection (*GetMembersFunction)(int16_t version);
         typedef StructInfo::BaseClassCollection (*GetBaseClassesFunction)(int16_t version);
-        StructInfo(HashedString name, int16_t current_version, GetMembersFunction get_members, GetBaseClassesFunction get_bases);
+        StructInfo(ReflectionHashedString name, int16_t current_version, GetMembersFunction get_members, GetBaseClassesFunction get_bases);
 
-        const HashedString & GetName() const noexcept { return name; }
+        const ReflectionHashedString & GetName() const noexcept { return name; }
         int16_t GetCurrentVersion() const noexcept { return current_version; }
         const ClassHeaderList & GetCurrentHeaders() const;
         const MemberCollection & GetDirectMembers(int16_t version) const;
@@ -953,7 +962,7 @@ struct MetaType
         static BaseClassCollection NoBaseClasses(int16_t);
 
     private:
-        HashedString name;
+        ReflectionHashedString name;
         int16_t current_version;
         lazy_initialize<ClassHeaderList> current_headers;
         GetMembersFunction get_members;
@@ -1096,7 +1105,7 @@ struct MetaType
     }
 
     template<typename T>
-    static MetaType RegisterEnum(std::map<int32_t, HashedString> values)
+    static MetaType RegisterEnum(std::map<int32_t, ReflectionHashedString> values)
     {
         static_assert(sizeof(T) == sizeof(int32_t), "I only support enums that are int-sized right now.");
         static_assert(MetaTraits<T>::access_type == PASS_BY_VALUE, "enums have to be cheap to copy");
@@ -1128,7 +1137,7 @@ struct MetaType
     }
 
     template<typename T>
-    static MetaType RegisterStruct(HashedString name, int16_t current_version, StructInfo::GetMembersFunction get_members, StructInfo::GetBaseClassesFunction get_bases = &StructInfo::NoBaseClasses)
+    static MetaType RegisterStruct(ReflectionHashedString name, int16_t current_version, StructInfo::GetMembersFunction get_members, StructInfo::GetBaseClassesFunction get_bases = &StructInfo::NoBaseClasses)
     {
         return { StructInfo(std::move(name), current_version, get_members, get_bases), GeneralInformation::CreateForType<T>(), MetaTraits<T>::access_type };
     }
@@ -1177,7 +1186,7 @@ private:
 
     MetaType(GeneralInformation, AllTypesThatExist category, AccessType access_type);
     MetaType(StringInfo string_info, GeneralInformation general, AccessType access_type);
-    MetaType(GeneralInformation, std::map<int32_t, HashedString> enum_values);
+    MetaType(GeneralInformation, std::map<int32_t, ReflectionHashedString> enum_values);
     MetaType(ListInfo list_info, GeneralInformation);
     MetaType(ArrayInfo array_info, GeneralInformation, AccessType access_type);
     MetaType(SetInfo set_info, GeneralInformation);
@@ -1205,7 +1214,7 @@ struct MetaTraits<T, typename std::enable_if<std::is_enum<T>::value>::type>
     static constexpr const AccessType access_type = PASS_BY_VALUE;
 };
 template<typename T>
-struct MetaTraits<Range<T> >
+struct MetaTraits<ArrayView<T> >
 {
     static constexpr const AccessType access_type = PASS_BY_VALUE;
 };
@@ -1213,46 +1222,46 @@ struct MetaTraits<Range<T> >
 struct MetaMember
 {
     template<typename T, typename S>
-    MetaMember(HashedString name, T (*getter)(const S &), MetaOwningVariant (*get_variant)(const MetaReference &), void (*setter)(MetaReference &, MetaReference &))
+    MetaMember(ReflectionHashedString name, T (*getter)(const S &), MetaOwningVariant (*get_variant)(const MetaReference &), void (*setter)(MetaReference &, MetaReference &))
         : name(std::move(name)), struct_type(&GetMetaType<S>()), type(&GetMetaType<T>()), value_member_access(getter, get_variant, setter)
     {
     }
-    MetaMember(HashedString name, MetaReference (*get_ref)(MetaReference &), const MetaType & type, const MetaType & struct_type)
+    MetaMember(ReflectionHashedString name, MetaReference (*get_ref)(MetaReference &), const MetaType & type, const MetaType & struct_type)
         : name(std::move(name)), struct_type(&struct_type), type(&type), ref_member_access(get_ref)
     {
     }
-    MetaMember(HashedString name, ConstMetaReference (*get_ref)(ConstMetaReference &), void (*setter)(MetaReference &, MetaReference &), const MetaType & type, const MetaType & struct_type)
+    MetaMember(ReflectionHashedString name, ConstMetaReference (*get_ref)(ConstMetaReference &), void (*setter)(MetaReference &, MetaReference &), const MetaType & type, const MetaType & struct_type)
         : name(std::move(name)), struct_type(&struct_type), type(&type), ref_value_member_access(get_ref, setter)
     {
     }
 
     template<typename T, typename S, T S::* Member>
-    static MetaMember CreateFromMemPtr(HashedString name)
+    static MetaMember CreateFromMemPtr(ReflectionHashedString name)
     {
         return MemberCreatorSpecialization<T, S, Member, MetaTraits<T>::access_type>()(std::move(name));
     }
     template<typename T, typename S, T (S::*Getter)() const, void (S::*Setter)(T)>
-    static MetaMember CreateFromGetterSetter(HashedString name)
+    static MetaMember CreateFromGetterSetter(ReflectionHashedString name)
     {
         return { std::move(name), &ValueMemberAccess::wrap_member_getter<T, S, Getter>, &ValueMemberAccess::wrap_member_get_variant<T, S, Getter>, &ValueMemberAccess::wrap_member_setter<T, S, Setter> };
     }
     template<typename T, typename S, T (*Getter)(const S &), void (*Setter)(S &, T)>
-    static MetaMember CreateFromGetterSetter(HashedString name)
+    static MetaMember CreateFromGetterSetter(ReflectionHashedString name)
     {
         return { std::move(name), &ValueMemberAccess::wrap_getter<T, S, Getter>, &ValueMemberAccess::wrap_get_variant<T, S, Getter>, &ValueMemberAccess::wrap_setter<T, S, Setter> };
     }
     template<typename T, typename S, const T & (S::*Getter)() const, void (S::*Setter)(T)>
-    static MetaMember CreateFromGetterSetter(HashedString name)
+    static MetaMember CreateFromGetterSetter(ReflectionHashedString name)
     {
         return { std::move(name), &RefValueMemberAccess::member_get_ref<T, S, Getter>, &RefValueMemberAccess::member_set<T, S, Setter>, GetMetaType<T>(), GetMetaType<S>() };
     }
     template<typename T, typename S, T & (S::*GetRef)()>
-    static MetaMember CreateFromGetRef(HashedString name)
+    static MetaMember CreateFromGetRef(ReflectionHashedString name)
     {
         return { std::move(name), &RefMemberAccess::member_get_variant_ref<T, S, GetRef>, GetMetaType<T>(), GetMetaType<S>() };
     }
     template<typename T, typename S, T & (*GetRef)(S &)>
-    static MetaMember CreateFromGetRef(HashedString name)
+    static MetaMember CreateFromGetRef(ReflectionHashedString name)
     {
         return { std::move(name), &RefMemberAccess::get_variant_ref<T, S, GetRef>, GetMetaType<T>(), GetMetaType<S>() };
     }
@@ -1263,7 +1272,7 @@ struct MetaMember
     MetaReference GetRef(MetaReference object) const;
     ConstMetaReference GetCRef(ConstMetaReference object) const;
 
-    const HashedString & GetName() const
+    const ReflectionHashedString & GetName() const
     {
         return name;
     }
@@ -1283,7 +1292,7 @@ private:
     template<typename T, typename S, T S::* Member>
     struct MemberCreatorSpecialization<T, S, Member, PASS_BY_VALUE>
     {
-        MetaMember operator()(HashedString name) const
+        MetaMember operator()(ReflectionHashedString name) const
         {
             RAW_ASSERT(GetMetaType<T>().access_type == PASS_BY_VALUE);
             return { std::move(name), &ValueMemberAccess::member_ptr_getter<T, S, Member>, &ValueMemberAccess::member_ptr_get_variant<T, S, Member>, &ValueMemberAccess::member_ptr_setter<T, S, Member> };
@@ -1292,7 +1301,7 @@ private:
     template<typename T, typename S, T S::* Member>
     struct MemberCreatorSpecialization<T, S, Member, PASS_BY_REFERENCE>
     {
-        MetaMember operator()(HashedString name) const
+        MetaMember operator()(ReflectionHashedString name) const
         {
             RAW_ASSERT(GetMetaType<T>().access_type == PASS_BY_REFERENCE);
             return { std::move(name), &RefMemberAccess::member_ptr_get_variant_ref<T, S, Member>, meta::GetMetaType<T>(), meta::GetMetaType<S>() };
@@ -1301,7 +1310,7 @@ private:
     template<typename T, typename S, T S::* Member>
     struct MemberCreatorSpecialization<T, S, Member, GET_BY_REF_SET_BY_VALUE>
     {
-        MetaMember operator()(HashedString name) const
+        MetaMember operator()(ReflectionHashedString name) const
         {
             RAW_ASSERT(GetMetaType<T>().access_type == GET_BY_REF_SET_BY_VALUE);
             return { std::move(name), &RefValueMemberAccess::member_ptr_get_ref<T, S, Member>, &RefValueMemberAccess::member_ptr_set<T, S, Member>, meta::GetMetaType<T>(), meta::GetMetaType<S>() };
@@ -1438,7 +1447,7 @@ private:
         }
     };
 
-    HashedString name;
+    ReflectionHashedString name;
     const MetaType * struct_type;
     const MetaType * type;
 
@@ -1516,17 +1525,17 @@ private:
 
 struct MetaOwningMemory
 {
-    MetaOwningMemory(Range<unsigned char> memory, const MetaType & type)
+    MetaOwningMemory(ArrayView<unsigned char> memory, const MetaType & type)
         : type(type), memory(memory)
     {
         type.Construct(this->memory);
     }
-    MetaOwningMemory(Range<unsigned char> memory, const MetaReference & other)
+    MetaOwningMemory(ArrayView<unsigned char> memory, const MetaReference & other)
         : type(other.GetType()), memory(memory)
     {
         type.CopyConstruct(this->memory, other.GetMemory());
     }
-    MetaOwningMemory(Range<unsigned char> memory, MetaReference && other)
+    MetaOwningMemory(ArrayView<unsigned char> memory, MetaReference && other)
         : type(other.GetType()), memory(memory)
     {
         type.MoveConstruct(this->memory, other.GetMemory());
@@ -1544,7 +1553,7 @@ struct MetaOwningMemory
 
 private:
     const MetaType & type;
-    Range<unsigned char> memory;
+    ArrayView<unsigned char> memory;
 };
 
 struct MetaOwningVariant
@@ -1859,7 +1868,7 @@ struct BaseClass::BaseMemberCollection
             return member.GetCRef(static_cast_reference(offset, member.GetStructType(), object));
         }
 
-        const HashedString & GetName() const
+        const ReflectionHashedString & GetName() const
         {
             return member.GetName();
         }
