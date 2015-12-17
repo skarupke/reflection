@@ -13,6 +13,7 @@ std::ostream & operator<<(std::ostream & lhs, StringView<const char> rhs)
 TEST(range, equal)
 {
     StringView<const char> a = "hello, world";
+    ASSERT_EQ(a, a);
     ASSERT_EQ("hello, world", a);
     ASSERT_NE("hello, world!", a);
     ASSERT_NE("hello world", a);

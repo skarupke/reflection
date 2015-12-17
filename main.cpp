@@ -13,6 +13,7 @@
 #include <boost/archive/binary_oarchive.hpp>
 #include "os/mmapped_file.hpp"
 #include <cstring> // for memcpy
+#include "util/compressed_buffer.hpp"
 
 using namespace metav3;
 struct memcpy_speed_comparison
@@ -20,15 +21,6 @@ struct memcpy_speed_comparison
     float vec[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     int i = 0;
     float f = 0.0f;
-
-    bool operator==(const memcpy_speed_comparison & other) const
-    {
-        return std::equal(vec, vec + 4, other.vec) && i == other.i && f == other.f;
-    }
-    bool operator!=(const memcpy_speed_comparison & other) const
-    {
-        return !(*this == other);
-    }
 
     template<typename Ar>
     void serialize(Ar & archive, int)
@@ -45,21 +37,13 @@ REFLECT_CLASS_START(memcpy_speed_comparison, 0)
     REFLECT_MEMBER(f);
 REFLECT_CLASS_END()
 
-void test_write_memcpy(const std::string & filename, const std::vector<memcpy_speed_comparison> & elements)
+bool operator==(const memcpy_speed_comparison & lhs, const memcpy_speed_comparison & rhs)
 {
-    std::ofstream file(filename, std::ios::binary);
-    size_t size = elements.size();
-    file.write(reinterpret_cast<const char *>(&size), sizeof(size));
-    file.write(reinterpret_cast<const char *>(elements.data()), sizeof(memcpy_speed_comparison) * elements.size());
+    return std::equal(lhs.vec, lhs.vec + 4, rhs.vec) && lhs.i == rhs.i && lhs.f == rhs.f;
 }
-std::vector<memcpy_speed_comparison> memcpy_from_bytes(ArrayView<const unsigned char> bytes)
+bool operator!=(const memcpy_speed_comparison & lhs, const memcpy_speed_comparison & rhs)
 {
-    size_t size = *reinterpret_cast<const size_t *>(bytes.begin());
-    ArrayView<const unsigned char> content = { bytes.begin() + sizeof(size), bytes.end() };
-    std::vector<memcpy_speed_comparison> elements;
-    elements.resize(size);
-    memcpy(elements.data(), content.begin(), content.size());
-    return elements;
+    return !(lhs == rhs);
 }
 
 std::vector<memcpy_speed_comparison> test_read_serialization(const std::string & filename)
@@ -69,23 +53,28 @@ std::vector<memcpy_speed_comparison> test_read_serialization(const std::string &
     read_optimistic_binary(result, file.get_bytes());
     return result;
 }
-void test_write_serialization_fast(const std::string & filename, const std::vector<memcpy_speed_comparison> & elements)
-{
-    std::ofstream file(filename);
-    metaf::BinaryOutput output(file);
-    metaf::write_binary(output, elements);
-}
 
 std::vector<memcpy_speed_comparison> generate_comparison_data()
 {
     std::vector<memcpy_speed_comparison> elements(100000);
+    std::mt19937_64 engine(5);
+    std::geometric_distribution<int> distribution(1 / 100.0f);
+    std::uniform_int_distribution<int> negative_int(0, 1);
+    auto random_int = [&]{ return negative_int(engine) ? -distribution(engine) : distribution(engine); };
+    std::binomial_distribution<int> float_distribution(256, 0.5f);
+    auto random_float = [&]{ return (float_distribution(engine) - 128) / 8.0f; };
+    std::uniform_int_distribution<int> unchanged_distribution(0, 2);
+    auto should_set = []{ return true; };//[&]{ return !unchanged_distribution(engine); };
     for (size_t i = 0; i < elements.size(); ++i)
     {
-        //std::fill(elements[i].vec, elements[i].vec + 4, std::numeric_limits<float>::max());
-        //elements[i].f = std::numeric_limits<float>::max();
-        //elements[i].i = std::numeric_limits<int>::max();
-        elements[i].f = float(i);
-        elements[i].i = i % 5;
+        //if (should_set())
+        //    std::generate(elements[i].vec, elements[i].vec + 4, random_float);
+        if (should_set())
+            elements[i].f = random_float();
+        if (should_set())
+            elements[i].i = random_int();
+        //elements[i].f = float(i);
+        //elements[i].i = i % 5;
     }
     return elements;
 }
@@ -101,6 +90,27 @@ void MemcpyInMemory(benchmark::State & state)
 }
 BENCHMARK(MemcpyInMemory);
 
+void test_write_memcpy(std::ostream & out, const std::vector<memcpy_speed_comparison> & elements)
+{
+    size_t size = elements.size();
+    out.write(reinterpret_cast<const char *>(&size), sizeof(size));
+    out.write(reinterpret_cast<const char *>(elements.data()), sizeof(memcpy_speed_comparison) * elements.size());
+}
+
+void test_write_memcpy(const std::string & filename, const std::vector<memcpy_speed_comparison> & elements)
+{
+    std::ofstream file(filename, std::ios::binary);
+    test_write_memcpy(file, elements);
+}
+std::vector<memcpy_speed_comparison> memcpy_from_bytes(ArrayView<const unsigned char> bytes)
+{
+    size_t size = *reinterpret_cast<const size_t *>(bytes.begin());
+    ArrayView<const unsigned char> content = { bytes.begin() + sizeof(size), bytes.end() };
+    std::vector<memcpy_speed_comparison> elements(size);
+    memcpy(elements.data(), content.begin(), content.size());
+    return elements;
+}
+
 void MemcpyReading(benchmark::State & state)
 {
     std::vector<memcpy_speed_comparison> elements = generate_comparison_data();
@@ -115,6 +125,66 @@ void MemcpyReading(benchmark::State & state)
     }
 }
 BENCHMARK(MemcpyReading);
+
+void MemcpyFileReading(benchmark::State & state)
+{
+    std::vector<memcpy_speed_comparison> elements = generate_comparison_data();
+    std::string memcpy_filename = "/tmp/memcpy_test";
+    test_write_memcpy(memcpy_filename, elements);
+    while (state.KeepRunning())
+    {
+        UnixFile file(memcpy_filename, UnixFile::RDONLY);
+        size_t size = file.size();
+        std::unique_ptr<unsigned char[]> bytes(new unsigned char[size]);
+        ArrayView<unsigned char> as_range(bytes.get(), bytes.get() + size);
+        file.read(as_range);
+        std::vector<memcpy_speed_comparison> comparison = memcpy_from_bytes(as_range);
+        file.evict_from_os_cache();
+        RAW_ASSERT(comparison == elements);
+    }
+}
+BENCHMARK(MemcpyFileReading);
+
+void MemcpyDirectReading(benchmark::State & state)
+{
+    std::vector<memcpy_speed_comparison> elements = generate_comparison_data();
+    std::string memcpy_filename = "/tmp/memcpy_test";
+    test_write_memcpy(memcpy_filename, elements);
+    while (state.KeepRunning())
+    {
+        UnixFile file(memcpy_filename, UnixFile::RDONLY);
+        size_t vec_size = 0;
+        file.read({ reinterpret_cast<unsigned char *>(&vec_size), reinterpret_cast<unsigned char *>(&vec_size) + sizeof(vec_size) });
+        std::vector<memcpy_speed_comparison> comparison(vec_size);
+        file.read({ reinterpret_cast<unsigned char *>(comparison.data()), reinterpret_cast<unsigned char*>(comparison.data() + vec_size) });
+        file.evict_from_os_cache();
+        RAW_ASSERT(comparison == elements);
+    }
+}
+BENCHMARK(MemcpyDirectReading);
+
+void MemcpyCompressedReading(benchmark::State & state)
+{
+    std::vector<memcpy_speed_comparison> elements = generate_comparison_data();
+    std::string memcpy_filename = "/tmp/memcpy_compressed_test";
+    {
+        std::stringstream uncompressed;
+        test_write_memcpy(uncompressed, elements);
+        std::string as_string = uncompressed.str();
+        std::ofstream out(memcpy_filename);
+        CompressedBuffer compressed(as_string);
+        out.write(reinterpret_cast<const char *>(compressed.get_bytes().begin()), compressed.get_bytes().size());
+    }
+    while (state.KeepRunning())
+    {
+        MMappedFileRead file(memcpy_filename);
+        UncompressedBuffer uncompressed(file.get_bytes());
+        std::vector<memcpy_speed_comparison> comparison = memcpy_from_bytes(uncompressed.get_bytes());
+        file.close_and_evict_from_os_cache();
+        RAW_ASSERT(comparison == elements);
+    }
+}
+BENCHMARK(MemcpyCompressedReading);
 
 void ReflectionInMemory(benchmark::State & state)
 {
@@ -137,7 +207,11 @@ void ReflectionReading(benchmark::State & state)
 {
     std::string serialization_filename_fast = "/tmp/serialization_test_fast";
     std::vector<memcpy_speed_comparison> elements = generate_comparison_data();
-    test_write_serialization_fast(serialization_filename_fast, elements);
+    {
+        std::ofstream file(serialization_filename_fast);
+        metaf::BinaryOutput output(file);
+        metaf::write_binary(output, elements);
+    }
     while (state.KeepRunning())
     {
         MMappedFileRead file(serialization_filename_fast);
@@ -149,6 +223,32 @@ void ReflectionReading(benchmark::State & state)
     }
 }
 BENCHMARK(ReflectionReading);
+
+void ReflectionCompressedReading(benchmark::State & state)
+{
+    std::string serialization_filename_fast = "/tmp/serialization_test_fast_compressed";
+    std::vector<memcpy_speed_comparison> elements = generate_comparison_data();
+    {
+        std::stringstream uncompressed;
+        metaf::BinaryOutput output(uncompressed);
+        metaf::write_binary(output, elements);
+        std::ofstream file(serialization_filename_fast);
+        std::string as_string = uncompressed.str();
+        CompressedBuffer compressed(as_string);
+        file.write(reinterpret_cast<const char *>(compressed.get_bytes().begin()), compressed.get_bytes().size());
+    }
+    while (state.KeepRunning())
+    {
+        MMappedFileRead file(serialization_filename_fast);
+        UncompressedBuffer uncompressed(file.get_bytes());
+        metaf::BinaryInput input(uncompressed.get_bytes());
+        std::vector<memcpy_speed_comparison> comparison;
+        metaf::read_binary(input, comparison);
+        RAW_ASSERT(comparison == elements);
+        file.close_and_evict_from_os_cache();
+    }
+}
+BENCHMARK(ReflectionCompressedReading);
 
 void SlowReflectionReading(benchmark::State & state)
 {
@@ -164,7 +264,7 @@ void SlowReflectionReading(benchmark::State & state)
         RAW_ASSERT(comparison == elements);
     }
 }
-BENCHMARK(SlowReflectionReading);
+//BENCHMARK(SlowReflectionReading);
 
 void JsonReflectionReading(benchmark::State & state)
 {
@@ -183,7 +283,7 @@ void JsonReflectionReading(benchmark::State & state)
         RAW_ASSERT(comparison == elements);
     }
 }
-BENCHMARK(JsonReflectionReading);
+//BENCHMARK(JsonReflectionReading);
 
 void BoostSerializationReading(benchmark::State & state)
 {
@@ -205,7 +305,7 @@ void BoostSerializationReading(benchmark::State & state)
         UnixFile(boost_filename, 0).evict_from_os_cache();
     }
 }
-BENCHMARK(BoostSerializationReading);
+//BENCHMARK(BoostSerializationReading);
 
 #include <gtest/gtest.h>
 
@@ -218,8 +318,8 @@ int main(int argc, char * argv[])
 #endif
     if (result == 0)
     {
-        //::benchmark::Initialize(&argc, argv);
-        //::benchmark::RunSpecifiedBenchmarks();
+        ::benchmark::Initialize(&argc, argv);
+        ::benchmark::RunSpecifiedBenchmarks();
     }
     return result;
 }

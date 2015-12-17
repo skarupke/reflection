@@ -25,15 +25,17 @@ INPUT_FOLDERS += 'src/protobuf/'
 INPUT_FOLDERS += 'src/util/'
 
 for _, v in ipairs(INPUT_FOLDERS) do
-    SOURCES += tup.glob(v .. '*.cpp')
+    CPP_SOURCES += tup.glob(v .. '*.cpp')
 end
 
 OUTPUT_FOLDERS = INPUT_FOLDERS
 
-SOURCES += 'libs/gtest/src/gtest-all.cc'
+CPP_SOURCES += 'libs/gtest/src/gtest-all.cc'
 OUTPUT_FOLDERS += 'libs/gtest/src/'
-SOURCES += tup.glob('libs/benchmark/src/*.cc')
+CPP_SOURCES += tup.glob('libs/benchmark/src/*.cc')
 OUTPUT_FOLDERS += 'libs/benchmark/src/'
+C_SOURCES += tup.glob('libs/z4/*.c')
+OUTPUT_FOLDERS += 'libs/z4/'
 
 protobuf_headers = {}
 function compile_protobuf()
@@ -71,8 +73,11 @@ compile_flatbuffers()
 generated_headers = protobuf_headers
 generated_headers += flatbuffers_headers
 
-for i, v in ipairs(SOURCES) do
+for i, v in ipairs(CPP_SOURCES) do
     compile_cpp(v, generated_headers)
+end
+for i, v in ipairs(C_SOURCES) do
+    compile_c(v, generated_headers)
 end
 
 executable_name = 'main'

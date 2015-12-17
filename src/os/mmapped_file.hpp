@@ -5,6 +5,10 @@
 
 struct UnixFile
 {
+    static const int RDONLY;
+    static const int RDWR;
+    static const int WRONLY;
+
     UnixFile(StringView<const char> filename, int flags);
     UnixFile(StringView<const char> filename, int flags, int mode);
     ~UnixFile();
@@ -15,6 +19,9 @@ struct UnixFile
     }
 
     void evict_from_os_cache();
+
+    size_t size();
+    size_t read(ArrayView<unsigned char> bytes);
 
     int file_descriptor = -1;
 };

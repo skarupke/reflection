@@ -31,7 +31,7 @@ void ProtobufReading(benchmark::State & state)
     {
         UnixFile file(tmp_filename, O_RDONLY);
         test::Array copy;
-        copy.ParseFromFileDescriptor(file.file_descriptor);
+        copy.ParsePartialFromFileDescriptor(file.file_descriptor);
         for (int i = 0; i < 100000; ++i)
         {
             const test::LoadFastTest & test = copy.array(i);
@@ -45,5 +45,5 @@ void ProtobufReading(benchmark::State & state)
         file.evict_from_os_cache();
     }
 }
-BENCHMARK(ProtobufReading);
+//BENCHMARK(ProtobufReading);
 #endif

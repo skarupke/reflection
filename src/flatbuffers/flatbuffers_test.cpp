@@ -47,6 +47,6 @@ void FlatbuffersReading(benchmark::State & state)
         file.close_and_evict_from_os_cache();
     }
 }
-BENCHMARK(FlatbuffersReading);
+//BENCHMARK(FlatbuffersReading);
 
 #endif

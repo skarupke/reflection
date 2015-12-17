@@ -35,6 +35,11 @@ struct BaseArrayView
         : begin_(begin), end_(end)
     {
     }
+    template<size_t Size>
+    BaseArrayView(T (&buffer)[Size])
+        : BaseArrayView(buffer, buffer + Size)
+    {
+    }
 
     typedef typename template_add_const<Derived>::type ConstDerived;
 
@@ -102,31 +107,6 @@ struct BaseArrayView
         return begin_ == end_;
     }
 
-    bool operator<(BaseArrayView other) const
-    {
-        return std::lexicographical_compare(begin_, end_, other.begin_, other.end_);
-    }
-    bool operator>(BaseArrayView other) const
-    {
-        return other < *this;
-    }
-    bool operator<=(BaseArrayView other) const
-    {
-        return !(other < *this);
-    }
-    bool operator>=(BaseArrayView other) const
-    {
-        return !(*this < other);
-    }
-    bool operator==(BaseArrayView other) const
-    {
-        if (begin_ == other.begin_) return end_ == other.end_;
-        else return size() == other.size() && std::equal(begin_, end_, other.begin_);
-    }
-    bool operator!=(BaseArrayView other) const
-    {
-        return !(*this == other);
-    }
     Derived subview(size_t index, size_t length = std::numeric_limits<size_t>::max()) const
     {
         size_t my_length = size();
@@ -162,6 +142,58 @@ struct remove_const<const T>
 {
     typedef T type;
 };
+
+template<typename T, typename D>
+bool operator<(BaseArrayView<T, D> lhs, BaseArrayView<T, D> rhs)
+{
+    return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+}
+template<typename T, typename D>
+bool operator>(BaseArrayView<T, D> lhs, BaseArrayView<T, D> rhs)
+{
+    return rhs < lhs;
+}
+template<typename T, typename D>
+bool operator<=(BaseArrayView<T, D> lhs, BaseArrayView<T, D> rhs)
+{
+    return !(rhs < lhs);
+}
+template<typename T, typename D>
+bool operator>=(BaseArrayView<T, D> lhs, BaseArrayView<T, D> rhs)
+{
+    return !(lhs < rhs);
+}
+template<typename T, typename D>
+bool operator==(BaseArrayView<T, D> lhs, BaseArrayView<T, D> rhs)
+{
+    if (lhs.begin() == rhs.begin()) return lhs.end() == rhs.end();
+    else return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+template<typename T, typename D>
+bool operator!=(BaseArrayView<T, D> lhs, BaseArrayView<T, D> rhs)
+{
+    return !(lhs == rhs);
+}
+template<typename T, template<typename> class D>
+bool operator==(BaseArrayView<T, D<T>> lhs, BaseArrayView<const T, D<const T>> rhs)
+{
+    return D<const T>(lhs) == rhs;
+}
+template<typename T, template<typename> class D>
+bool operator==(BaseArrayView<const T, D<const T>> lhs, BaseArrayView<T, D<T>> rhs)
+{
+    return lhs == D<const T>(rhs);
+}
+template<typename T, template<typename> class D>
+bool operator!=(BaseArrayView<T, D<T>> lhs, BaseArrayView<const T, D<const T>> rhs)
+{
+    return !(*lhs == rhs);
+}
+template<typename T, template<typename> class D>
+bool operator!=(BaseArrayView<const T, D<const T>> lhs, BaseArrayView<T, D<T>> rhs)
+{
+    return !(*lhs == rhs);
+}
 }
 
 template<typename T>
@@ -199,36 +231,6 @@ struct StringView : detail::BaseArrayView<C, StringView<C>>
         return string_type(this->begin(), this->end());
     }
 
-    using Base::operator<;
-    using Base::operator<=;
-    using Base::operator>;
-    using Base::operator>=;
-    using Base::operator==;
-    using Base::operator!=;
-    bool operator<(const string_type & rhs) const
-    {
-        return std::lexicographical_compare(this->begin(), this->end(), rhs.begin(), rhs.end());
-    }
-    inline bool operator<=(const string_type & rhs) const;
-    inline bool operator>(const string_type & rhs) const;
-    bool operator>=(const string_type & rhs) const
-    {
-        return !(*this < rhs);
-    }
-    bool operator==(const string_type & rhs) const
-    {
-        return this->size() == rhs.size() && std::equal(this->begin(), this->end(), rhs.begin());
-    }
-    bool operator!=(const string_type & rhs) const
-    {
-        return !(*this == rhs);
-    }
-    string_type operator+(string_type rhs) const
-    {
-        rhs.insert(rhs.begin(), this->begin(), this->end());
-        return rhs;
-    }
-
     StringView<C> substr(size_t index, size_t length = std::numeric_limits<size_t>::max()) const
     {
         return this->subview(index, length);
@@ -236,32 +238,47 @@ struct StringView : detail::BaseArrayView<C, StringView<C>>
 };
 
 template<typename C>
-inline bool operator<(const typename StringView<C>::string_type & lhs, const StringView<C> & rhs)
+inline bool operator<(StringView<C> lhs, const typename StringView<C>::string_type & rhs)
 {
     return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
 }
 template<typename C>
-inline bool operator<=(const typename StringView<C>::string_type & lhs, const StringView<C> & rhs)
-{
-    return !(rhs < lhs);
-}
-template<typename C>
-inline bool operator>(const typename StringView<C>::string_type & lhs, const StringView<C> & rhs)
-{
-    return rhs < lhs;
-}
-template<typename C>
-inline bool operator>=(const typename StringView<C>::string_type & lhs, const StringView<C> & rhs)
-{
-    return !(lhs < rhs);
-}
-template<typename C>
-inline bool operator==(const typename StringView<C>::string_type & lhs, const StringView<C> & rhs)
+inline bool operator==(StringView<C> lhs, const typename StringView<C>::string_type & rhs)
 {
     return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 template<typename C>
-inline bool operator!=(const typename StringView<C>::string_type & lhs, const StringView<C> & rhs)
+inline bool operator!=(StringView<C> lhs, const typename StringView<C>::string_type & rhs)
+{
+    return !(lhs == rhs);
+}
+template<typename C>
+inline bool operator<(const typename StringView<C>::string_type & lhs, StringView<C> rhs)
+{
+    return std::lexicographical_compare(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());
+}
+template<typename C>
+inline bool operator<=(const typename StringView<C>::string_type & lhs, StringView<C> rhs)
+{
+    return !(rhs < lhs);
+}
+template<typename C>
+inline bool operator>(const typename StringView<C>::string_type & lhs, StringView<C> rhs)
+{
+    return rhs < lhs;
+}
+template<typename C>
+inline bool operator>=(const typename StringView<C>::string_type & lhs, StringView<C> rhs)
+{
+    return !(lhs < rhs);
+}
+template<typename C>
+inline bool operator==(const typename StringView<C>::string_type & lhs, StringView<C> rhs)
+{
+    return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
+}
+template<typename C>
+inline bool operator!=(const typename StringView<C>::string_type & lhs, StringView<C> rhs)
 {
     return !(lhs == rhs);
 }
@@ -292,14 +309,25 @@ inline bool operator!=(StringView<const C> lhs, const C * rhs)
 }
 
 template<typename C>
-inline bool StringView<C>::operator<=(const typename StringView<C>::string_type & rhs) const
+inline bool operator<=(StringView<C> lhs, const typename StringView<C>::string_type & rhs)
 {
-    return !(rhs < *this);
+    return !(rhs < lhs);
 }
 template<typename C>
-inline bool StringView<C>::operator>(const typename StringView<C>::string_type & rhs) const
+inline bool operator>(StringView<C> lhs, const typename StringView<C>::string_type & rhs)
 {
-    return rhs < *this;
+    return rhs < lhs;
+}
+template<typename C>
+inline bool operator>=(StringView<C> lhs, const typename StringView<C>::string_type & rhs)
+{
+    return !(lhs < rhs);
+}
+template<typename C>
+inline typename StringView<C>::string_type operator+(StringView<C> lhs, typename StringView<C>::string_type rhs)
+{
+    rhs.insert(rhs.begin(), lhs.begin(), lhs.end());
+    return rhs;
 }
 template<typename C>
 inline typename StringView<C>::string_type operator+(typename StringView<C>::string_type lhs, StringView<C> rhs)

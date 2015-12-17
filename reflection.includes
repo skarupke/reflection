@@ -22,3 +22,12 @@ build-clang/src/flatbuffers
 /home/malte/workspace/flatbuffers/include
 build-clang/src/protobuf
 src/flatbuffers
+libs/benchmark/cmake
+libs/z4
+libs/benchmark/include/benchmark
+libs/benchmark/src
+libs/gtest/src
+libs/gtest/gtest
+libs/gtest/gtest/internal
+libs/benchmark/test
+build-clang-static-analysis

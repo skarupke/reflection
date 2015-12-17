@@ -194,7 +194,7 @@ TEST(metafast, float_compressed_special_values)
     ASSERT_TRUE(TestCompressedFloat(-std::numeric_limits<float>::infinity()));
 }
 #endif
-/*TEST(metafast, all_compressed_floats)
+TEST(metafast, DISABLED_all_compressed_floats)
 {
     metaf::detail::FloatComponentsCompressed compressed(metaf::detail::FloatComponents(0.0f));
     std::cout << metaf::detail::FloatComponents(compressed).f << '\n';
@@ -207,7 +207,7 @@ TEST(metafast, float_compressed_special_values)
         }
         while(compressed.mantissa);
     }
-}*/
+}
 
 #endif
 

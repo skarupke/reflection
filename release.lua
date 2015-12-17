@@ -1,2 +1,2 @@
-CPP_FLAGS += '-O2'
+C_CPP_FLAGS += '-O2'
 DEFINES += '-DNDEBUG'

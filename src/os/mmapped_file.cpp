@@ -5,6 +5,10 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
+const int UnixFile::RDONLY = O_RDONLY;
+const int UnixFile::RDWR = O_RDWR;
+const int UnixFile::WRONLY = O_WRONLY;
+
 UnixFile::UnixFile(StringView<const char> filename, int flags)
     : file_descriptor(open(filename.begin(), flags))
 {
@@ -22,6 +26,17 @@ void UnixFile::evict_from_os_cache()
 {
     fdatasync(file_descriptor);
     posix_fadvise(file_descriptor, 0, 0, POSIX_FADV_DONTNEED);
+}
+
+size_t UnixFile::size()
+{
+    off_t end = lseek(file_descriptor, 0, SEEK_END);
+    off_t begin = lseek(file_descriptor, 0, SEEK_SET);
+    return end - begin;
+}
+size_t UnixFile::read(ArrayView<unsigned char> bytes)
+{
+    return ::read(file_descriptor, bytes.begin(), bytes.size());
 }
 
 struct MMappedFileRead::Internals

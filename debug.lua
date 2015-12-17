@@ -1,1 +1,1 @@
-CPP_FLAGS += '-O0'
+C_CPP_FLAGS += '-O0'
